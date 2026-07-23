@@ -119,6 +119,20 @@ export async function searchCounterparties(token: string, query: string): Promis
 
 export type PaymentDocType = 'cashin' | 'paymentin'
 
+/** A custom attribute (доп. поле) defined on a document type's metadata. */
+export interface DocAttribute { id: string; name: string; type: string }
+
+/**
+ * Custom attributes (доп. поля) declared for a cashin/paymentin document type.
+ * Used to locate the "От кого" field so its value can be written on creation.
+ */
+export async function getDocAttributes(token: string, type: PaymentDocType): Promise<DocAttribute[]> {
+  const data = await get<{ rows: Array<{ id: string; name: string; type: string }> }>(
+    `/entity/${type}/metadata/attributes`, {}, token
+  ).catch(() => ({ rows: [] as Array<{ id: string; name: string; type: string }> }))
+  return (data.rows ?? []).map(a => ({ id: a.id, name: a.name, type: a.type }))
+}
+
 export interface CreatePaymentDocParams {
   type: PaymentDocType
   organizationId: string
@@ -127,11 +141,14 @@ export interface CreatePaymentDocParams {
   sumMajor: number
   /** Omit both when using the account's default (base) currency */
   currencyId?: string
-  /** Base-currency units per 1 unit of currencyId — from CurrencyRate.rate */
+  /** Base-currency units per 1 unit of currencyId — the current directory rate */
   currencyRate?: number
   paymentPurpose?: string
   /** "YYYY-MM-DD HH:MM:SS" — omitted means MoySklad stamps "now" */
   moment?: string
+  /** Value + attribute id of the "От кого" custom field (доп. поле) */
+  fromWhom?: string
+  fromWhomAttrId?: string
 }
 
 export interface CreatedDoc { id: string; name: string | null; uuidHref: string | null }
@@ -147,6 +164,16 @@ export async function createPaymentDocument(token: string, p: CreatePaymentDocPa
   if (p.paymentPurpose) body.paymentPurpose = p.paymentPurpose
   if (p.currencyId && p.currencyRate) {
     body.rate = { currency: msRef('currency', p.currencyId), value: p.currencyRate }
+  }
+  if (p.fromWhom && p.fromWhomAttrId) {
+    body.attributes = [{
+      meta: {
+        href: `${MS_API_ROOT}/entity/${p.type}/metadata/attributes/${p.fromWhomAttrId}`,
+        type: 'attributemetadata',
+        mediaType: 'application/json',
+      },
+      value: p.fromWhom,
+    }]
   }
 
   const r = await msFetch(`${BASE}/entity/${p.type}`, {

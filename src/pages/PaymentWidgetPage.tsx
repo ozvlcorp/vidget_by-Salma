@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo } from 'react'
 import type { ChangeEvent } from 'react'
 import { Plus, Trash2, ExternalLink, CheckCircle2, XCircle, Loader2 } from 'lucide-react'
 import {
-  getOrganizations, getCurrencies, searchCounterparties, createPaymentDocument, msDate,
+  getOrganizations, getCurrencies, searchCounterparties, createPaymentDocument, getDocAttributes, msDate,
   type OrganizationOption, type CounterpartyOption, type PaymentDocType,
 } from '../api/moysklad'
 import { useAppContext } from '../context/AppContext'
@@ -102,6 +102,10 @@ export default function PaymentWidgetPage() {
   const [totalAmount, setTotalAmount] = useState(0)
   const [currencyIso, setCurrencyIso] = useState('')
   const [paymentPurpose, setPaymentPurpose] = useState('')
+  const [fromWhom, setFromWhom] = useState('')
+
+  // "От кого" custom attribute id for the currently selected doc type (null if the field isn't defined there)
+  const [fromWhomAttrId, setFromWhomAttrId] = useState<string | null>(null)
 
   const nextKey = useRef(1)
   const [rows, setRows] = useState<SplitRow[]>([{ key: 'row-0', agent: null, amount: 0 }])
@@ -113,6 +117,19 @@ export default function PaymentWidgetPage() {
     getOrganizations(token).then(setOrganizations).catch(() => setOrganizations([]))
     if (currencies.length === 0) getCurrencies(token).then(setCurrencies).catch(() => {})
   }, [token]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Resolve the "От кого" доп. поле for the chosen document type (id differs per type)
+  useEffect(() => {
+    let cancelled = false
+    getDocAttributes(token, docType)
+      .then(attrs => {
+        if (cancelled) return
+        const found = attrs.find(a => /от\s*кого/i.test(a.name))
+        setFromWhomAttrId(found?.id ?? null)
+      })
+      .catch(() => { if (!cancelled) setFromWhomAttrId(null) })
+    return () => { cancelled = true }
+  }, [token, docType])
 
   useEffect(() => {
     if (organizations && organizations.length > 0 && !orgId) setOrgId(organizations[0].id)
@@ -150,8 +167,16 @@ export default function PaymentWidgetPage() {
   async function handleSubmit() {
     setSubmitting(true)
     setResults({})
-    const isDefault = !selectedCurrency || selectedCurrency.isDefault
     const momentStr = msDate(new Date())
+
+    // Re-read currencies so the exchange rate is the current one from the directory,
+    // not a value cached at page load.
+    const freshCurrencies = await getCurrencies(token).catch(() => currencies)
+    setCurrencies(freshCurrencies)
+    const cur = freshCurrencies.find(c => c.isoCode === currencyIso) ?? selectedCurrency
+    const isDefault = !cur || cur.isDefault
+
+    const fromWhomTrim = fromWhom.trim()
 
     await Promise.all(validRows.map(async row => {
       try {
@@ -160,10 +185,12 @@ export default function PaymentWidgetPage() {
           organizationId: orgId,
           agentId: row.agent!.id,
           sumMajor: row.amount,
-          currencyId: isDefault ? undefined : selectedCurrency!.id,
-          currencyRate: isDefault ? undefined : selectedCurrency!.rate,
+          currencyId: isDefault ? undefined : cur!.id,
+          currencyRate: isDefault ? undefined : cur!.rate,
           paymentPurpose: paymentPurpose.trim() || undefined,
           moment: momentStr,
+          fromWhom: fromWhomTrim || undefined,
+          fromWhomAttrId: fromWhomAttrId ?? undefined,
         })
         setResults(prev => ({ ...prev, [row.key]: { status: 'success', link: doc.uuidHref } }))
       } catch (e) {
@@ -207,6 +234,21 @@ export default function PaymentWidgetPage() {
                 ))}
               </select>
             </div>
+          </div>
+
+          {/* «От кого» — источник денег, до распределения (доп. поле документа) */}
+          <div>
+            <label className="text-xs font-semibold text-muted uppercase tracking-wide mb-1.5 block">{t(lang, 'pwFromWhom')}</label>
+            <input
+              type="text"
+              value={fromWhom}
+              onChange={e => setFromWhom(e.target.value)}
+              placeholder={t(lang, 'pwFromWhomPlaceholder')}
+              className={INPUT_CLS}
+            />
+            {fromWhom.trim() && fromWhomAttrId === null && (
+              <p className="text-xs text-amber-600 mt-1">{t(lang, 'pwFromWhomMissing')}</p>
+            )}
           </div>
         </section>
 

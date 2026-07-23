@@ -41,8 +41,8 @@
     --accent-strong: 37 99 235;
   }
 
-  /* Advent Pro reads small/light — scale up the whole UI by ~15% (rem-based) */
-  html { font-size: 115%; }
+  /* Scaled up so the widget reads large on-screen (rem-based → whole UI scales) */
+  html { font-size: 200%; }
   html, body { height: 100%; overflow-y: auto; }
 
   body {
