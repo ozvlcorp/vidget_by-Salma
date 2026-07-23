@@ -82,7 +82,7 @@ function CounterpartyCombobox({
         className={INPUT_CLS}
       />
       {open && (
-        <div className="absolute z-30 mt-1 w-full max-h-56 overflow-y-auto rounded-lg border border-line bg-surface shadow-lg">
+        <div className="absolute z-30 mt-1 w-full max-h-56 overflow-y-auto overscroll-contain rounded-lg border border-line bg-surface shadow-lg">
           {searching ? (
             <div className="px-3 py-2 text-xs text-muted">{t(lang, 'loading')}</div>
           ) : suggestions.length === 0 ? (
@@ -224,9 +224,9 @@ export default function PaymentWidgetPage() {
   }
 
   return (
-    <div className="fabric-bg min-h-screen">
-      <header className="sticky top-0 z-20 bg-surface/70 backdrop-blur-md border-b border-line">
-        <div className="px-6 h-16 flex items-center gap-4">
+    <div className="fabric-bg h-screen flex flex-col overflow-hidden">
+      <header className="shrink-0 bg-surface/70 backdrop-blur-md border-b border-line">
+        <div className="px-6 h-14 flex items-center gap-4">
           <span className="m3-title-large text-fg">{t(lang, 'pwTitle')}</span>
           <div className="flex-1" />
           <LangSwitcher />
@@ -234,10 +234,12 @@ export default function PaymentWidgetPage() {
         </div>
       </header>
 
-      <main className="px-6 py-7 space-y-6 max-w-4xl mx-auto">
+      {/* Single scroll region so the whole widget stays within one window
+          (works inside a fixed-height MoySklad iframe too) */}
+      <main className="flex-1 overflow-y-auto px-6 py-5 space-y-4 max-w-3xl mx-auto w-full">
 
         {/* ── Amount & currency ── */}
-        <section className="bg-surface/75 backdrop-blur-sm rounded-xl border border-line card-shadow p-6 space-y-4">
+        <section className="bg-surface/75 backdrop-blur-sm rounded-xl border border-line card-shadow p-5 space-y-3">
           <h2 className="text-base font-semibold text-fg">{t(lang, 'pwAmountSection')}</h2>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="sm:col-span-2">
@@ -276,7 +278,7 @@ export default function PaymentWidgetPage() {
         </section>
 
         {/* ── Counterparties ── */}
-        <section className="bg-surface/75 backdrop-blur-sm rounded-xl border border-line card-shadow p-6 space-y-4">
+        <section className="bg-surface/75 backdrop-blur-sm rounded-xl border border-line card-shadow p-5 space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-base font-semibold text-fg">{t(lang, 'pwCounterpartiesSection')}</h2>
             <div className="text-sm">
@@ -369,7 +371,7 @@ export default function PaymentWidgetPage() {
         </section>
 
         {/* ── Document type & legal entity ── */}
-        <section className="bg-surface/75 backdrop-blur-sm rounded-xl border border-line card-shadow p-6 space-y-4">
+        <section className="bg-surface/75 backdrop-blur-sm rounded-xl border border-line card-shadow p-5 space-y-3">
           <h2 className="text-base font-semibold text-fg">{t(lang, 'pwDocSection')}</h2>
 
           <div className="flex gap-3">

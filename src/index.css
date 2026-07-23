@@ -41,8 +41,8 @@
     --accent-strong: 37 99 235;
   }
 
-  /* Scaled up so the widget reads large on-screen (rem-based → whole UI scales) */
-  html { font-size: 200%; }
+  /* Root scale — kept moderate so the whole widget fits one screen (rem-based) */
+  html { font-size: 118%; }
   html, body { height: 100%; overflow-y: auto; }
 
   body {
