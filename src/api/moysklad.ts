@@ -107,12 +107,18 @@ export async function getOrganizations(token: string): Promise<OrganizationOptio
 
 export interface CounterpartyOption { id: string; name: string }
 
-/** Live counterparty search (by name/phone/INN) for the split-row autocomplete. */
+/**
+ * Counterparty list for the split-row autocomplete. With a query it searches
+ * by name/phone/INN; with an empty query it returns the first counterparties
+ * (name order) so a list shows as soon as the field is focused.
+ */
 export async function searchCounterparties(token: string, query: string): Promise<CounterpartyOption[]> {
   const q = query.trim()
-  if (!q) return []
+  const params: Record<string, string> = q
+    ? { search: q, limit: '20' }
+    : { limit: '20', order: 'name,asc' }
   const data = await get<{ rows: Array<{ id: string; name: string; archived?: boolean }> }>(
-    '/entity/counterparty', { search: q, limit: '20' }, token
+    '/entity/counterparty', params, token
   ).catch(() => ({ rows: [] as Array<{ id: string; name: string; archived?: boolean }> }))
   return data.rows.filter(c => !c.archived).map(c => ({ id: c.id, name: c.name }))
 }
@@ -120,17 +126,77 @@ export async function searchCounterparties(token: string, query: string): Promis
 export type PaymentDocType = 'cashin' | 'paymentin'
 
 /** A custom attribute (доп. поле) defined on a document type's metadata. */
-export interface DocAttribute { id: string; name: string; type: string }
+export interface DocAttribute {
+  id: string
+  name: string
+  type: string
+  /** For type === 'customentity' — meta.href of the dictionary (справочник) */
+  customEntityHref: string | null
+}
 
 /**
  * Custom attributes (доп. поля) declared for a cashin/paymentin document type.
  * Used to locate the "От кого" field so its value can be written on creation.
  */
 export async function getDocAttributes(token: string, type: PaymentDocType): Promise<DocAttribute[]> {
-  const data = await get<{ rows: Array<{ id: string; name: string; type: string }> }>(
+  const data = await get<{ rows: Array<{ id: string; name: string; type: string; customEntityMeta?: { href?: string } }> }>(
     `/entity/${type}/metadata/attributes`, {}, token
-  ).catch(() => ({ rows: [] as Array<{ id: string; name: string; type: string }> }))
-  return (data.rows ?? []).map(a => ({ id: a.id, name: a.name, type: a.type }))
+  ).catch(() => ({ rows: [] as Array<{ id: string; name: string; type: string; customEntityMeta?: { href?: string } }> }))
+  return (data.rows ?? []).map(a => ({
+    id: a.id, name: a.name, type: a.type, customEntityHref: a.customEntityMeta?.href ?? null,
+  }))
+}
+
+/** Finds a dictionary (справочник) element by exact name, creating it if absent. Returns its meta. */
+async function findOrCreateCustomEntity(
+  token: string, dictHref: string | null, name: string
+): Promise<Record<string, unknown>> {
+  const dictId = dictHref?.match(/customentity\/([0-9a-fA-F-]{36})/)?.[1]
+  if (!dictId) throw new Error('Не удалось определить справочник для поля «От кого»')
+  const init: RequestInit = { headers: { Authorization: `Bearer ${token}` } }
+
+  const sr = await msFetch(`${BASE}/entity/customentity/${dictId}?search=${encodeURIComponent(name)}&limit=20`, init)
+  if (sr.ok) {
+    const d = await sr.json() as { rows?: Array<{ name?: string; meta?: Record<string, unknown> }> }
+    const hit = (d.rows ?? []).find(r => (r.name ?? '').toLowerCase() === name.toLowerCase())
+    if (hit?.meta) return hit.meta
+  }
+
+  const cr = await msFetch(`${BASE}/entity/customentity/${dictId}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  })
+  if (!cr.ok) {
+    const text = await cr.text().catch(() => '')
+    throw new Error(`Не удалось создать значение справочника «${name}»: ${text.slice(0, 120)}`)
+  }
+  const created = await cr.json() as { meta?: Record<string, unknown> }
+  if (!created.meta) throw new Error('Справочник вернул элемент без meta')
+  return created.meta
+}
+
+/**
+ * Builds the `attributes[]` entry for the "От кого" доп. поле, matching its type:
+ * text/string/link → plain string value; customentity (справочник) → find-or-create
+ * a dictionary element and reference it. Other object types are unsupported.
+ */
+export async function buildFromWhomAttribute(
+  token: string, type: PaymentDocType, attr: DocAttribute, text: string
+): Promise<Record<string, unknown>> {
+  const meta = {
+    href: `${MS_API_ROOT}/entity/${type}/metadata/attributes/${attr.id}`,
+    type: 'attributemetadata',
+    mediaType: 'application/json',
+  }
+  if (attr.type === 'string' || attr.type === 'text' || attr.type === 'link') {
+    return { meta, value: text }
+  }
+  if (attr.type === 'customentity') {
+    const elMeta = await findOrCreateCustomEntity(token, attr.customEntityHref, text)
+    return { meta, value: { meta: elMeta } }
+  }
+  throw new Error(`Тип доп. поля «${attr.name}» (${attr.type}) не поддерживается — сделайте его текстовым`)
 }
 
 export interface CreatePaymentDocParams {
@@ -146,9 +212,8 @@ export interface CreatePaymentDocParams {
   paymentPurpose?: string
   /** "YYYY-MM-DD HH:MM:SS" — omitted means MoySklad stamps "now" */
   moment?: string
-  /** Value + attribute id of the "От кого" custom field (доп. поле) */
-  fromWhom?: string
-  fromWhomAttrId?: string
+  /** Ready-built `attributes[]` entries (e.g. from buildFromWhomAttribute) */
+  attributes?: Array<Record<string, unknown>>
 }
 
 export interface CreatedDoc { id: string; name: string | null; uuidHref: string | null }
@@ -165,15 +230,8 @@ export async function createPaymentDocument(token: string, p: CreatePaymentDocPa
   if (p.currencyId && p.currencyRate) {
     body.rate = { currency: msRef('currency', p.currencyId), value: p.currencyRate }
   }
-  if (p.fromWhom && p.fromWhomAttrId) {
-    body.attributes = [{
-      meta: {
-        href: `${MS_API_ROOT}/entity/${p.type}/metadata/attributes/${p.fromWhomAttrId}`,
-        type: 'attributemetadata',
-        mediaType: 'application/json',
-      },
-      value: p.fromWhom,
-    }]
+  if (p.attributes && p.attributes.length) {
+    body.attributes = p.attributes
   }
 
   const r = await msFetch(`${BASE}/entity/${p.type}`, {

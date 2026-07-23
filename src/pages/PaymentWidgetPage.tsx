@@ -2,8 +2,9 @@ import { useState, useEffect, useRef, useMemo } from 'react'
 import type { ChangeEvent } from 'react'
 import { Plus, Trash2, ExternalLink, CheckCircle2, XCircle, Loader2 } from 'lucide-react'
 import {
-  getOrganizations, getCurrencies, searchCounterparties, createPaymentDocument, getDocAttributes, msDate,
-  type OrganizationOption, type CounterpartyOption, type PaymentDocType,
+  getOrganizations, getCurrencies, searchCounterparties, createPaymentDocument,
+  getDocAttributes, buildFromWhomAttribute, msDate,
+  type OrganizationOption, type CounterpartyOption, type PaymentDocType, type DocAttribute,
 } from '../api/moysklad'
 import { useAppContext } from '../context/AppContext'
 import { t } from '../i18n'
@@ -47,12 +48,8 @@ function CounterpartyCombobox({
     return () => document.removeEventListener('mousedown', onDocClick)
   }, [])
 
-  function handleInput(v: string) {
-    setQuery(v)
-    onSelect(null)
-    setOpen(true)
+  function runSearch(v: string) {
     if (debounceRef.current) clearTimeout(debounceRef.current)
-    if (!v.trim()) { setSuggestions([]); setSearching(false); return }
     setSearching(true)
     debounceRef.current = setTimeout(() => {
       searchCounterparties(token, v)
@@ -61,17 +58,30 @@ function CounterpartyCombobox({
     }, 300)
   }
 
+  function handleInput(v: string) {
+    setQuery(v)
+    onSelect(null)
+    setOpen(true)
+    runSearch(v)  // empty query → initial list, otherwise search
+  }
+
+  function handleFocus() {
+    setOpen(true)
+    // Populate an initial list on first focus so the user sees options without typing
+    if (suggestions.length === 0 && !searching) runSearch(query)
+  }
+
   return (
     <div ref={containerRef} className="relative">
       <input
         type="text"
         value={query}
         onChange={(e: ChangeEvent<HTMLInputElement>) => handleInput(e.target.value)}
-        onFocus={() => setOpen(true)}
+        onFocus={handleFocus}
         placeholder={t(lang, 'pwSearchCounterparty')}
         className={INPUT_CLS}
       />
-      {open && query.trim() && (
+      {open && (
         <div className="absolute z-30 mt-1 w-full max-h-56 overflow-y-auto rounded-lg border border-line bg-surface shadow-lg">
           {searching ? (
             <div className="px-3 py-2 text-xs text-muted">{t(lang, 'loading')}</div>
@@ -104,13 +114,14 @@ export default function PaymentWidgetPage() {
   const [paymentPurpose, setPaymentPurpose] = useState('')
   const [fromWhom, setFromWhom] = useState('')
 
-  // "От кого" custom attribute id for the currently selected doc type (null if the field isn't defined there)
-  const [fromWhomAttrId, setFromWhomAttrId] = useState<string | null>(null)
+  // "От кого" custom attribute for the currently selected doc type (null if the field isn't defined there)
+  const [fromWhomAttr, setFromWhomAttr] = useState<DocAttribute | null>(null)
 
   const nextKey = useRef(1)
   const [rows, setRows] = useState<SplitRow[]>([{ key: 'row-0', agent: null, amount: 0 }])
 
   const [submitting, setSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
   const [results, setResults] = useState<Record<string, RowResult>>({})
 
   useEffect(() => {
@@ -118,16 +129,16 @@ export default function PaymentWidgetPage() {
     if (currencies.length === 0) getCurrencies(token).then(setCurrencies).catch(() => {})
   }, [token]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Resolve the "От кого" доп. поле for the chosen document type (id differs per type)
+  // Resolve the "От кого" доп. поле for the chosen document type (id/type differ per type)
   useEffect(() => {
     let cancelled = false
     getDocAttributes(token, docType)
       .then(attrs => {
         if (cancelled) return
         const found = attrs.find(a => /от\s*кого/i.test(a.name))
-        setFromWhomAttrId(found?.id ?? null)
+        setFromWhomAttr(found ?? null)
       })
-      .catch(() => { if (!cancelled) setFromWhomAttrId(null) })
+      .catch(() => { if (!cancelled) setFromWhomAttr(null) })
     return () => { cancelled = true }
   }, [token, docType])
 
@@ -167,6 +178,7 @@ export default function PaymentWidgetPage() {
   async function handleSubmit() {
     setSubmitting(true)
     setResults({})
+    setSubmitError(null)
     const momentStr = msDate(new Date())
 
     // Re-read currencies so the exchange rate is the current one from the directory,
@@ -176,7 +188,19 @@ export default function PaymentWidgetPage() {
     const cur = freshCurrencies.find(c => c.isoCode === currencyIso) ?? selectedCurrency
     const isDefault = !cur || cur.isDefault
 
+    // Build the "От кого" attribute once (find-or-create dictionary element if needed).
+    // Abort the whole submit if it can't be built — otherwise docs would be created without the source.
     const fromWhomTrim = fromWhom.trim()
+    let attributes: Array<Record<string, unknown>> | undefined
+    if (fromWhomTrim && fromWhomAttr) {
+      try {
+        attributes = [await buildFromWhomAttribute(token, docType, fromWhomAttr, fromWhomTrim)]
+      } catch (e) {
+        setSubmitError(e instanceof Error ? e.message : String(e))
+        setSubmitting(false)
+        return
+      }
+    }
 
     await Promise.all(validRows.map(async row => {
       try {
@@ -189,8 +213,7 @@ export default function PaymentWidgetPage() {
           currencyRate: isDefault ? undefined : cur!.rate,
           paymentPurpose: paymentPurpose.trim() || undefined,
           moment: momentStr,
-          fromWhom: fromWhomTrim || undefined,
-          fromWhomAttrId: fromWhomAttrId ?? undefined,
+          attributes,
         })
         setResults(prev => ({ ...prev, [row.key]: { status: 'success', link: doc.uuidHref } }))
       } catch (e) {
@@ -246,7 +269,7 @@ export default function PaymentWidgetPage() {
               placeholder={t(lang, 'pwFromWhomPlaceholder')}
               className={INPUT_CLS}
             />
-            {fromWhom.trim() && fromWhomAttrId === null && (
+            {fromWhom.trim() && fromWhomAttr === null && (
               <p className="text-xs text-amber-600 mt-1">{t(lang, 'pwFromWhomMissing')}</p>
             )}
           </div>
@@ -389,6 +412,10 @@ export default function PaymentWidgetPage() {
             </div>
           </div>
         </section>
+
+        {submitError && (
+          <p className="text-sm text-red-600 text-center">{submitError}</p>
+        )}
 
         <button
           type="button"
