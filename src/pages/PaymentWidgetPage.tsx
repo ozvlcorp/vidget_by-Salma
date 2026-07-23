@@ -277,8 +277,10 @@ export default function PaymentWidgetPage() {
           </div>
         </section>
 
-        {/* ── Counterparties ── */}
-        <section className="bg-surface/75 backdrop-blur-sm rounded-xl border border-line card-shadow p-5 space-y-3">
+        {/* ── Counterparties ── (relative z-20 so the open suggestion dropdown
+             paints above the following card, whose backdrop-blur creates its own
+             stacking context) */}
+        <section className="relative z-20 bg-surface/75 backdrop-blur-sm rounded-xl border border-line card-shadow p-5 space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-base font-semibold text-fg">{t(lang, 'pwCounterpartiesSection')}</h2>
             <div className="text-sm">

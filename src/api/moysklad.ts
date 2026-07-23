@@ -147,12 +147,16 @@ export async function getDocAttributes(token: string, type: PaymentDocType): Pro
   }))
 }
 
+const UUID_RE = /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/g
+
 /** Finds a dictionary (справочник) element by exact name, creating it if absent. Returns its meta. */
 async function findOrCreateCustomEntity(
   token: string, dictHref: string | null, name: string
 ): Promise<Record<string, unknown>> {
-  const dictId = dictHref?.match(/customentity\/([0-9a-fA-F-]{36})/)?.[1]
-  if (!dictId) throw new Error('Не удалось определить справочник для поля «От кого»')
+  // The dictionary id is a UUID in the customEntityMeta href — take the last one,
+  // regardless of the exact path shape MoySklad uses.
+  const dictId = dictHref?.match(UUID_RE)?.pop()
+  if (!dictId) throw new Error(`Не удалось определить справочник для поля «От кого» (ссылка: ${dictHref ?? 'отсутствует'})`)
   const init: RequestInit = { headers: { Authorization: `Bearer ${token}` } }
 
   const sr = await msFetch(`${BASE}/entity/customentity/${dictId}?search=${encodeURIComponent(name)}&limit=20`, init)
@@ -193,7 +197,16 @@ export async function buildFromWhomAttribute(
     return { meta, value: text }
   }
   if (attr.type === 'customentity') {
-    const elMeta = await findOrCreateCustomEntity(token, attr.customEntityHref, text)
+    // The list metadata sometimes omits customEntityMeta — fetch the single
+    // attribute's metadata as a fallback to get the dictionary href.
+    let href = attr.customEntityHref
+    if (!href) {
+      const one = await get<{ customEntityMeta?: { href?: string } }>(
+        `/entity/${type}/metadata/attributes/${attr.id}`, {}, token
+      ).catch(() => null)
+      href = one?.customEntityMeta?.href ?? null
+    }
+    const elMeta = await findOrCreateCustomEntity(token, href, text)
     return { meta, value: { meta: elMeta } }
   }
   throw new Error(`Тип доп. поля «${attr.name}» (${attr.type}) не поддерживается — сделайте его текстовым`)
