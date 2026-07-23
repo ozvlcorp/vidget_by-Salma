@@ -1,0 +1,2 @@
+/api/moysklad/*  https://api.moysklad.ru/api/remap/1.2/:splat  200
+/*  /index.html  200

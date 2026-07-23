@@ -1,0 +1,119 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* Light theme — RGB triplets so Tailwind opacity modifiers work */
+  :root {
+    color-scheme: light;
+    --bg: 244 246 250;
+    --surface: 255 255 255;
+    --surface-2: 248 250 252;
+    --surface-3: 241 245 249;
+    --line: 226 232 240;
+    --fg: 30 41 59;
+    --muted: 100 116 139;
+    --faint: 148 163 184;
+    --accent: 37 99 235;
+    --accent-strong: 29 78 216;
+
+    /* Material 3 motion tokens */
+    --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+    --ease-emphasized: cubic-bezier(0.2, 0, 0, 1);
+    --ease-emph-decel: cubic-bezier(0.05, 0.7, 0.1, 1);
+    --ease-emph-accel: cubic-bezier(0.3, 0, 0.8, 0.15);
+    --dur-short: 200ms;
+    --dur-medium: 300ms;
+    --dur-long: 450ms;
+  }
+
+  .dark {
+    color-scheme: dark;
+    --bg: 7 10 19;
+    --surface: 15 20 36;
+    --surface-2: 11 16 32;
+    --surface-3: 17 26 46;
+    --line: 30 41 59;
+    --fg: 226 232 240;
+    --muted: 148 163 184;
+    --faint: 100 116 139;
+    --accent: 59 130 246;
+    --accent-strong: 37 99 235;
+  }
+
+  /* Advent Pro reads small/light — scale up the whole UI by ~15% (rem-based) */
+  html { font-size: 115%; }
+  html, body { height: 100%; overflow-y: auto; }
+
+  body {
+    @apply bg-base text-fg antialiased;
+    font-family: 'Advent Pro', system-ui, sans-serif;
+    font-weight: 500;
+    transition: background-color var(--dur-medium) var(--ease-standard), color var(--dur-medium) var(--ease-standard);
+  }
+
+  /* Numbers use the same font now, with tabular figures for column alignment */
+  .font-mono { font-family: 'Advent Pro', system-ui, sans-serif; font-variant-numeric: tabular-nums; font-feature-settings: 'tnum' 1, 'lnum' 1; }
+
+  /* Honour reduced-motion */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+  }
+}
+
+/* Flat themed page background */
+.fabric-bg {
+  background-color: rgb(var(--bg));
+  color: rgb(var(--fg));
+}
+
+/* ─── Material 3 elevation + shape ──────────────────────────────────────────── */
+.card-shadow {
+  border-radius: 1.5rem; /* M3 large container */
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.06), 0 1px 3px 1px rgb(15 23 42 / 0.08);
+  transition: box-shadow var(--dur-medium) var(--ease-emph-decel), transform var(--dur-medium) var(--ease-emph-decel);
+}
+.dark .card-shadow {
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.5), 0 6px 18px rgb(0 0 0 / 0.4);
+}
+
+/* ─── Material 3 interaction motion ─────────────────────────────────────────── */
+button, a {
+  transition:
+    background-color var(--dur-short) var(--ease-standard),
+    color var(--dur-short) var(--ease-standard),
+    border-color var(--dur-short) var(--ease-standard),
+    box-shadow var(--dur-short) var(--ease-standard),
+    transform var(--dur-short) var(--ease-emph-decel);
+}
+button:active, a:active { transform: scale(0.97); }
+button:disabled:active { transform: none; }
+
+/* Material ripple ink (injected by lib/ripple.ts) */
+.m3-ripple-ink {
+  position: absolute;
+  border-radius: 9999px;
+  background: currentColor;
+  opacity: 0.24;
+  transform: scale(0);
+  pointer-events: none;
+  animation: m3-ripple var(--dur-long) var(--ease-standard) forwards;
+}
+@keyframes m3-ripple {
+  to { transform: scale(2.2); opacity: 0; }
+}
+
+/* ─── Material 3 type scale (Advent Pro) ────────────────────────────────────── */
+.m3-title-large    { font-size: 1.375rem; line-height: 1.75rem; font-weight: 600; letter-spacing: 0.01em; }
+
+/* ─── Animations (M3 emphasized) ────────────────────────────────────────────── */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.animate-fade-up { animation: fadeUp var(--dur-long) var(--ease-emph-decel) forwards; }
+.animate-fade-in { animation: fadeIn var(--dur-medium) var(--ease-standard) forwards; }

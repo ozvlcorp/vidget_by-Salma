@@ -1,0 +1,17 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+# Proxy the MoySklad API (same mapping as the Vite dev proxy) so the
+# deployed widget can reach api.moysklad.ru without CORS issues.
+[[redirects]]
+  from = "/api/moysklad/*"
+  to = "https://api.moysklad.ru/api/remap/1.2/:splat"
+  status = 200
+  force = true
+
+# SPA fallback.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
