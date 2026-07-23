@@ -66,7 +66,7 @@ export interface CurrencyRate {
   isoCode: string
   symbol: string
   name: string
-  /** Base-currency units per 1 unit of this currency (rate / multiplicity) */
+  /** Base-currency units per 1 unit of this currency (e.g. 12000 for 1 USD = 12000 UZS) */
   rate: number
   isDefault: boolean
 }
@@ -76,17 +76,24 @@ export async function getCurrencies(token: string): Promise<CurrencyRate[]> {
     rows: Array<{
       id: string; isoCode: string; symbol: string; name: string
       // MoySklad uses "default" (not "isDefault") for the accounting currency flag
-      default: boolean; rate: number; multiplicity: number
+      default: boolean; rate: number; multiplicity: number; indirect?: boolean
     }>
   }>('/entity/currency', { limit: '50' }, token)
-  return data.rows.map(c => ({
-    id: c.id,
-    isoCode: c.isoCode,
-    symbol: c.symbol,
-    name: c.name,
-    rate: (c.rate || 1) / (c.multiplicity || 1),
-    isDefault: c.default ?? false,
-  }))
+  return data.rows.map(c => {
+    const rate = c.rate || 1, mult = c.multiplicity || 1
+    // `indirect` means the stored rate is the inverse (foreign per base); normalize
+    // everything to base-currency units per 1 unit of this currency.
+    const basePerUnit = c.indirect ? (mult / rate) : (rate / mult)
+    return {
+      id: c.id,
+      isoCode: c.isoCode,
+      symbol: c.symbol,
+      name: c.name,
+      // Round off floating-point noise from the inversion (used for display/override only)
+      rate: Number(basePerUnit.toPrecision(6)),
+      isDefault: c.default ?? false,
+    }
+  })
 }
 
 // ─── Payment split widget: legal entities, counterparty search, document creation ──
@@ -218,10 +225,13 @@ export interface CreatePaymentDocParams {
   agentId: string
   /** Amount in the document's own currency, major units (e.g. сум, not tiyin) */
   sumMajor: number
-  /** Omit both when using the account's default (base) currency */
+  /** Omit when using the account's default (base) currency */
   currencyId?: string
-  /** Base-currency units per 1 unit of currencyId — the current directory rate */
-  currencyRate?: number
+  /**
+   * Manual rate override (base-currency units per 1 unit of currencyId).
+   * Omit to let MoySklad apply the current rate from the currency directory.
+   */
+  rateValue?: number
   paymentPurpose?: string
   /** "YYYY-MM-DD HH:MM:SS" — omitted means MoySklad stamps "now" */
   moment?: string
@@ -240,8 +250,11 @@ export async function createPaymentDocument(token: string, p: CreatePaymentDocPa
   }
   if (p.moment) body.moment = p.moment
   if (p.paymentPurpose) body.paymentPurpose = p.paymentPurpose
-  if (p.currencyId && p.currencyRate) {
-    body.rate = { currency: msRef('currency', p.currencyId), value: p.currencyRate }
+  if (p.currencyId) {
+    // With a value → manual override; without → MoySklad uses the current directory rate.
+    body.rate = p.rateValue != null && p.rateValue > 0
+      ? { currency: msRef('currency', p.currencyId), value: p.rateValue }
+      : { currency: msRef('currency', p.currencyId) }
   }
   if (p.attributes && p.attributes.length) {
     body.attributes = p.attributes

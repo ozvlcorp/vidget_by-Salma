@@ -114,6 +114,11 @@ export default function PaymentWidgetPage() {
   const [paymentPurpose, setPaymentPurpose] = useState('')
   const [fromWhom, setFromWhom] = useState('')
 
+  // Manual exchange-rate override. `rateInput` is pre-filled with the directory rate;
+  // `rateEdited` marks that the client changed it, so we only override then.
+  const [rateInput, setRateInput] = useState(0)
+  const [rateEdited, setRateEdited] = useState(false)
+
   // "От кого" custom attribute for the currently selected doc type (null if the field isn't defined there)
   const [fromWhomAttr, setFromWhomAttr] = useState<DocAttribute | null>(null)
 
@@ -152,6 +157,13 @@ export default function PaymentWidgetPage() {
     }
   }, [currencies, currencyIso])
 
+  // On currency change, pre-fill the rate with the directory value and reset the edited flag
+  useEffect(() => {
+    const cur = currencies.find(c => c.isoCode === currencyIso)
+    setRateInput(cur && !cur.isDefault ? cur.rate : 0)
+    setRateEdited(false)
+  }, [currencyIso, currencies])
+
   function addRow() {
     setRows(rs => [...rs, { key: `row-${nextKey.current++}`, agent: null, amount: 0 }])
   }
@@ -173,6 +185,7 @@ export default function PaymentWidgetPage() {
   const validRows = useMemo(() => rows.filter(r => r.agent && r.amount > 0), [rows])
 
   const selectedCurrency = currencies.find(c => c.isoCode === currencyIso)
+  const baseIso = currencies.find(c => c.isDefault)?.isoCode ?? ''
   const canSubmit = !submitting && !!orgId && validRows.length > 0
 
   async function handleSubmit() {
@@ -181,12 +194,11 @@ export default function PaymentWidgetPage() {
     setSubmitError(null)
     const momentStr = msDate(new Date())
 
-    // Re-read currencies so the exchange rate is the current one from the directory,
-    // not a value cached at page load.
-    const freshCurrencies = await getCurrencies(token).catch(() => currencies)
-    setCurrencies(freshCurrencies)
-    const cur = freshCurrencies.find(c => c.isoCode === currencyIso) ?? selectedCurrency
+    const cur = selectedCurrency
     const isDefault = !cur || cur.isDefault
+    // Only override the rate when the client actually changed it; otherwise omit it
+    // so MoySklad applies the current rate from its currency directory.
+    const overrideRate = !isDefault && rateEdited && rateInput > 0 ? rateInput : undefined
 
     // Build the "От кого" attribute once (find-or-create dictionary element if needed).
     // Abort the whole submit if it can't be built — otherwise docs would be created without the source.
@@ -210,7 +222,7 @@ export default function PaymentWidgetPage() {
           agentId: row.agent!.id,
           sumMajor: row.amount,
           currencyId: isDefault ? undefined : cur!.id,
-          currencyRate: isDefault ? undefined : cur!.rate,
+          rateValue: overrideRate,
           paymentPurpose: paymentPurpose.trim() || undefined,
           moment: momentStr,
           attributes,
@@ -260,6 +272,26 @@ export default function PaymentWidgetPage() {
               </select>
             </div>
           </div>
+
+          {/* Exchange rate — pre-filled from the currency directory, editable by the client.
+              Shown only for a non-default (foreign) currency. */}
+          {selectedCurrency && !selectedCurrency.isDefault && (
+            <div>
+              <label className="text-xs font-semibold text-muted uppercase tracking-wide mb-1.5 block">{t(lang, 'pwRate')}</label>
+              <div className="flex items-center gap-2 text-sm text-fg">
+                <span className="text-muted whitespace-nowrap">1 {selectedCurrency.isoCode} =</span>
+                <div className="w-40">
+                  <GroupedNumberInput
+                    value={rateInput}
+                    onChange={n => { setRateInput(n); setRateEdited(true) }}
+                    className={`${INPUT_CLS} font-mono`}
+                  />
+                </div>
+                <span className="text-muted whitespace-nowrap">{baseIso}</span>
+              </div>
+              <p className="text-xs text-faint mt-1">{t(lang, 'pwRateHint')}</p>
+            </div>
+          )}
 
           {/* «От кого» — источник денег, до распределения (доп. поле документа) */}
           <div>

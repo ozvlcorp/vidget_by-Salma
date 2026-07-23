@@ -1,4 +1,4 @@
-import { useState, useRef, useLayoutEffect } from 'react'
+import { useState, useRef, useLayoutEffect, useEffect } from 'react'
 import type { ChangeEvent } from 'react'
 
 /** Keeps digits and at most one decimal separator (comma or dot, normalized to dot). */
@@ -37,11 +37,20 @@ export function GroupedNumberInput({
   className?: string
   autoFocus?: boolean
 }) {
-  // `value` only ever changes as a result of this input's own onChange, so the
-  // display text needs no external-prop resync — the lazy initializer covers mount.
   const [text, setText] = useState<string>(value ? formatDisplay(String(value)) : '')
   const inputRef = useRef<HTMLInputElement>(null)
   const pendingCaretDigits = useRef<number | null>(null)
+  // Tracks the numeric value this input last emitted, so a genuine external
+  // change (e.g. a programmatic pre-fill) resyncs the text, while the echo of
+  // our own onChange does not fight the user's typing.
+  const lastEmitted = useRef(value)
+
+  useEffect(() => {
+    if (value !== lastEmitted.current) {
+      lastEmitted.current = value
+      setText(value ? formatDisplay(String(value)) : '')
+    }
+  }, [value])
 
   useLayoutEffect(() => {
     const target = pendingCaretDigits.current
@@ -65,7 +74,9 @@ export function GroupedNumberInput({
     const clean = sanitize(el.value)
     pendingCaretDigits.current = digitsBefore
     setText(formatDisplay(clean))
-    onChange(parseAmount(clean))
+    const n = parseAmount(clean)
+    lastEmitted.current = n
+    onChange(n)
   }
 
   return (
