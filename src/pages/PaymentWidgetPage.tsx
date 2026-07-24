@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import type { ChangeEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { Plus, X } from 'lucide-react'
-import { searchFirms, searchClients, type NamedOption } from '../api/moysklad'
+import { searchCounterparties, type NamedOption } from '../api/moysklad'
 import { useAppContext } from '../context/AppContext'
 import { ThemeToggle } from '../components/ThemeToggle'
 import { GroupedNumberInput } from '../components/GroupedNumberInput'
@@ -11,10 +11,10 @@ import { GroupedNumberInput } from '../components/GroupedNumberInput'
 interface Row {
   key: string
   date: string          // YYYY-MM-DD
-  firm: NamedOption | null
+  firm: string          // название фирмы — свободный ввод (нет в МоемСкладе)
   amount: number        // в валюте (сум)
   rate: number          // курс
-  client: NamedOption | null
+  client: NamedOption | null   // контрагент из МоегоСклада
 }
 
 // Column layout — identical across header, rows and totals so everything lines up.
@@ -147,11 +147,11 @@ export default function PaymentWidgetPage() {
   const nextKey = useRef(1)
 
   const [rows, setRows] = useState<Row[]>([
-    { key: 'row-0', date: todayStr(), firm: null, amount: 0, rate: 0, client: null },
+    { key: 'row-0', date: todayStr(), firm: '', amount: 0, rate: 0, client: null },
   ])
 
   function addRow() {
-    setRows(rs => [...rs, { key: `row-${nextKey.current++}`, date: todayStr(), firm: null, amount: 0, rate: 0, client: null }])
+    setRows(rs => [...rs, { key: `row-${nextKey.current++}`, date: todayStr(), firm: '', amount: 0, rate: 0, client: null }])
   }
   function removeRow(key: string) {
     setRows(rs => (rs.length > 1 ? rs.filter(r => r.key !== key) : rs))
@@ -202,7 +202,7 @@ export default function PaymentWidgetPage() {
             <HeadCell label="Сумма" className="text-right" />
             <HeadCell label="Курс" className="text-right" />
             <HeadCell label="Сумма в $" className="text-right" />
-            <HeadCell label="Клиент" />
+            <HeadCell label="Контрагенты" />
             <div className="border-line" />
           </div>
 
@@ -219,7 +219,13 @@ export default function PaymentWidgetPage() {
                 />
               </div>
               <div className={CELLBOX}>
-                <SearchCell value={r.firm} onSelect={opt => patchRow(r.key, { firm: opt })} fetch={searchFirms} token={token} placeholder="Выберите фирму…" />
+                <input
+                  type="text"
+                  value={r.firm}
+                  onChange={e => patchRow(r.key, { firm: e.target.value })}
+                  placeholder="Введите название фирмы…"
+                  className={CELL}
+                />
               </div>
               <div className={CELLBOX}>
                 <GroupedNumberInput value={r.amount} onChange={n => patchRow(r.key, { amount: n })} placeholder="0" className={`${CELL} font-mono text-right`} />
@@ -231,7 +237,7 @@ export default function PaymentWidgetPage() {
                 <span className="font-mono text-sm text-muted tabular-nums">{fmtUsd(usdOf(r))}</span>
               </div>
               <div className={CELLBOX}>
-                <SearchCell value={r.client} onSelect={opt => patchRow(r.key, { client: opt })} fetch={searchClients} token={token} placeholder="Выберите клиента…" />
+                <SearchCell value={r.client} onSelect={opt => patchRow(r.key, { client: opt })} fetch={searchCounterparties} token={token} placeholder="Выберите контрагента…" />
               </div>
               <div className="flex items-center justify-center bg-surface">
                 <button
