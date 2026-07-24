@@ -3,8 +3,8 @@ import type { ChangeEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { Plus, X, Loader2 } from 'lucide-react'
 import {
-  searchCounterparties, getOrganizations, createPaymentDocument,
-  type NamedOption, type OrganizationOption, type PaymentDocType,
+  searchCounterparties, getOrganizations, createPaymentDocument, getCurrencies,
+  type NamedOption, type OrganizationOption, type PaymentDocType, type CurrencyRate,
 } from '../api/moysklad'
 import { useAppContext } from '../context/AppContext'
 import { ThemeToggle } from '../components/ThemeToggle'
@@ -104,14 +104,16 @@ function SearchCell({
         setOpen(false)
       }
     }
-    function onScrollResize() { setOpen(false) }
+    // Reposition (not close) on scroll, so the menu follows the input when the
+    // table scrolls AND stays open while the user scrolls inside the menu itself.
+    function reposition() { if (inputRef.current) setRect(inputRef.current.getBoundingClientRect()) }
     document.addEventListener('mousedown', onDocDown)
-    document.addEventListener('scroll', onScrollResize, true)
-    window.addEventListener('resize', onScrollResize)
+    document.addEventListener('scroll', reposition, true)
+    window.addEventListener('resize', reposition)
     return () => {
       document.removeEventListener('mousedown', onDocDown)
-      document.removeEventListener('scroll', onScrollResize, true)
-      window.removeEventListener('resize', onScrollResize)
+      document.removeEventListener('scroll', reposition, true)
+      window.removeEventListener('resize', reposition)
     }
   }, [open])
 
@@ -163,18 +165,27 @@ export default function PaymentWidgetPage() {
 
   const [organizations, setOrganizations] = useState<OrganizationOption[] | null>(null)
   const [orgId, setOrgId] = useState('')
+  // The сум (UZS) currency — documents are created in сум with a conversion rate,
+  // because the MoySklad accounting currency is USD.
+  const [uzsCurrency, setUzsCurrency] = useState<CurrencyRate | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [results, setResults] = useState<Record<string, RowResult>>({})
+  const [savedCount, setSavedCount] = useState(0)
 
   useEffect(() => {
-    getOrganizations(token).then(setOrganizations).catch(() => setOrganizations([]))
+    getOrganizations(token)
+      .then(orgs => {
+        setOrganizations(orgs)
+        if (orgs.length > 0) setOrgId(prev => prev || orgs[0].id)
+      })
+      .catch(() => setOrganizations([]))
+    getCurrencies(token)
+      .then(cs => setUzsCurrency(cs.find(c => c.isoCode === 'UZS') ?? null))
+      .catch(() => setUzsCurrency(null))
   }, [token])
 
-  useEffect(() => {
-    if (organizations && organizations.length > 0 && !orgId) setOrgId(organizations[0].id)
-  }, [organizations, orgId])
-
   function addRow() {
+    setSavedCount(0)
     setRows(rs => [...rs, { key: `row-${nextKey.current++}`, date: todayStr(), firm: '', amount: 0, rate: 0, client: null, type: 'cashin' }])
   }
   function removeRow(key: string) {
@@ -182,6 +193,7 @@ export default function PaymentWidgetPage() {
     setResults(rs => { if (!(key in rs)) return rs; const n = { ...rs }; delete n[key]; return n })
   }
   function patchRow(key: string, patch: Partial<Row>) {
+    setSavedCount(0)
     setRows(rs => rs.map(r => (r.key === key ? { ...r, ...patch } : r)))
   }
 
@@ -189,32 +201,54 @@ export default function PaymentWidgetPage() {
   const totalAmount = rows.reduce((s, r) => s + (r.amount || 0), 0)
   const totalUsd = rows.reduce((s, r) => s + usdOf(r), 0)
 
-  // A row is ready to save once it has a counterparty and a positive amount.
-  const validRows = rows.filter(r => r.client && r.amount > 0)
-  const canSubmit = !submitting && !!orgId && validRows.length > 0
+  // A row is ready to save once it has a counterparty, a positive amount and a
+  // conversion rate (needed to convert сум → the USD accounting currency).
+  const validRows = rows.filter(r => r.client && r.amount > 0 && r.rate > 0)
+  const canSubmit = !submitting && !!orgId && !!uzsCurrency && validRows.length > 0
+
+  function freshRow(): Row {
+    return { key: `row-${nextKey.current++}`, date: todayStr(), firm: '', amount: 0, rate: 0, client: null, type: 'cashin' }
+  }
 
   async function handleSubmit() {
+    if (!uzsCurrency) return
     setSubmitting(true)
     setResults({})
-    await Promise.all(validRows.map(async row => {
+    setSavedCount(0)
+
+    const entries = await Promise.all(validRows.map(async (row): Promise<[string, RowResult]> => {
       try {
         const doc = await createPaymentDocument(token, {
           type: row.type,
           organizationId: orgId,
           agentId: row.client!.id,
-          sumMajor: row.amount,
+          sumMajor: row.amount,                 // в сумах
+          currencyId: uzsCurrency.id,           // валюта документа = сум (UZS)
+          rateValue: 1 / row.rate,              // 1 USD = Курс сум  →  USD за 1 сум = 1/Курс
           paymentPurpose: row.firm.trim() || undefined,
           moment: `${row.date} 12:00:00`,
         })
-        setResults(prev => ({ ...prev, [row.key]: { status: 'success', link: doc.uuidHref } }))
+        return [row.key, { status: 'success', link: doc.uuidHref }]
       } catch (e) {
-        setResults(prev => ({ ...prev, [row.key]: { status: 'error', message: e instanceof Error ? e.message : String(e) } }))
+        return [row.key, { status: 'error', message: e instanceof Error ? e.message : String(e) }]
       }
     }))
+
+    const res = Object.fromEntries(entries)
+    const errors = entries.filter(([, r]) => r.status === 'error').length
     setSubmitting(false)
+
+    if (errors === 0) {
+      // Everything saved — reset the form to a single empty row.
+      setRows([freshRow()])
+      setResults({})
+      setSavedCount(entries.length)
+    } else {
+      // Keep the rows so failed ones can be fixed and re-submitted.
+      setResults(res)
+    }
   }
 
-  const successCount = Object.values(results).filter(r => r.status === 'success').length
   const errorCount = Object.values(results).filter(r => r.status === 'error').length
 
   const gutter = 'flex items-center justify-center bg-surface-2 border-r border-line text-xs text-faint font-mono select-none'
@@ -388,9 +422,11 @@ export default function PaymentWidgetPage() {
         <span>Строк: {rows.length}</span>
         <span className="tabular-nums">Итого: {totalAmount.toLocaleString('ru-RU')} · $ {fmtUsd(totalUsd)}</span>
         <div className="flex-1" />
-        {successCount > 0 && <span className="text-green-600">Создано: {successCount}</span>}
+        {savedCount > 0 && <span className="text-green-600">✓ Создано документов: {savedCount}</span>}
         {errorCount > 0 && <span className="text-red-600">Ошибок: {errorCount}</span>}
-        {successCount === 0 && errorCount === 0 && <span>Готово к отправке в МойСклад</span>}
+        {savedCount === 0 && errorCount === 0 && (
+          <span>{uzsCurrency ? 'Готово к отправке в МойСклад' : 'Валюта «сум» не найдена в справочнике'}</span>
+        )}
       </div>
     </div>
   )
