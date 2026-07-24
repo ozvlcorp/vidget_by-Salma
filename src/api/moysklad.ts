@@ -159,6 +159,23 @@ export async function getDocAttributes(token: string, type: PaymentDocType): Pro
 
 const UUID_RE = /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/g
 
+/**
+ * Searches the values of the "От кого" справочник (customentity dictionary) so the
+ * Фирма column can suggest existing companies. Returns [] when the field isn't a
+ * dictionary or the dictionary can't be resolved (the column then stays free-text).
+ */
+export async function searchFromWhomValues(token: string, attr: DocAttribute | null, query: string): Promise<NamedOption[]> {
+  if (!attr || attr.type !== 'customentity' || !attr.customEntityHref) return []
+  const dictId = attr.customEntityHref.match(UUID_RE)?.pop()
+  if (!dictId) return []
+  const q = query.trim()
+  const params: Record<string, string> = q ? { search: q, limit: '20' } : { limit: '20' }
+  const data = await get<{ rows?: Array<{ id: string; name: string }> }>(
+    `/entity/customentity/${dictId}`, params, token
+  ).catch(() => ({ rows: [] as Array<{ id: string; name: string }> }))
+  return (data.rows ?? []).map(r => ({ id: r.id, name: r.name }))
+}
+
 /** Finds a dictionary (справочник) element by exact name, creating it if absent. Returns its meta. */
 async function findOrCreateCustomEntity(
   token: string, dictHref: string | null, name: string

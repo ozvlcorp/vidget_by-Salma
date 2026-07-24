@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom'
 import { Plus, X, Loader2 } from 'lucide-react'
 import {
   searchCounterparties, getOrganizations, createPaymentDocument, getCurrencies,
-  getDocAttributes, buildFromWhomAttribute,
+  getDocAttributes, buildFromWhomAttribute, searchFromWhomValues,
   type NamedOption, type OrganizationOption, type PaymentDocType, type CurrencyRate, type DocAttribute,
 } from '../api/moysklad'
 import { useAppContext } from '../context/AppContext'
@@ -28,8 +28,8 @@ interface Row {
 type RowResult = { status: 'success' | 'error'; message?: string; link?: string | null }
 
 const PAYMENT_TYPES: Array<{ value: PaymentDocType; label: string }> = [
-  { value: 'cashin', label: 'Приходный ордер' },
-  { value: 'paymentin', label: 'Входящий платёж' },
+  { value: 'cashin', label: 'Наличные' },       // Приходный ордер
+  { value: 'paymentin', label: 'Перечисление' }, // Входящий платёж
 ]
 
 const CURRENCIES: Array<{ value: Cur; label: string }> = [
@@ -152,6 +152,98 @@ function SearchCell({
               key={it.id}
               type="button"
               onClick={() => choose(it)}
+              className="w-full text-left px-3 py-2 text-sm text-fg hover:bg-surface-2 transition-colors"
+            >
+              {it.name}
+            </button>
+          ))}
+        </div>,
+        document.body,
+      )}
+    </>
+  )
+}
+
+// ─── Фирма cell — free text with suggestions from the "От кого" справочник ────
+function FirmCell({
+  value, onChange, fetchSuggestions, placeholder,
+}: {
+  value: string
+  onChange: (text: string) => void
+  fetchSuggestions: (query: string) => Promise<NamedOption[]>
+  placeholder: string
+}) {
+  const [open, setOpen] = useState(false)
+  const [items, setItems] = useState<NamedOption[]>([])
+  const [loading, setLoading] = useState(false)
+  const [rect, setRect] = useState<DOMRect | null>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const debounce = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  function runSearch(q: string) {
+    if (debounce.current) clearTimeout(debounce.current)
+    setLoading(true)
+    debounce.current = setTimeout(() => {
+      fetchSuggestions(q).then(setItems).finally(() => setLoading(false))
+    }, 200)
+  }
+  function openMenu() {
+    if (inputRef.current) setRect(inputRef.current.getBoundingClientRect())
+    setOpen(true)
+    runSearch(value)
+  }
+  function handleInput(v: string) {
+    onChange(v)
+    if (inputRef.current) setRect(inputRef.current.getBoundingClientRect())
+    setOpen(true)
+    runSearch(v)
+  }
+  function choose(name: string) {
+    onChange(name)
+    setOpen(false)
+  }
+
+  useEffect(() => {
+    if (!open) return
+    function onDocDown(e: MouseEvent) {
+      const t = e.target as HTMLElement
+      if (inputRef.current && !inputRef.current.contains(t) && !t.closest('[data-firm-menu]')) setOpen(false)
+    }
+    function reposition() { if (inputRef.current) setRect(inputRef.current.getBoundingClientRect()) }
+    document.addEventListener('mousedown', onDocDown)
+    document.addEventListener('scroll', reposition, true)
+    window.addEventListener('resize', reposition)
+    return () => {
+      document.removeEventListener('mousedown', onDocDown)
+      document.removeEventListener('scroll', reposition, true)
+      window.removeEventListener('resize', reposition)
+    }
+  }, [open])
+
+  return (
+    <>
+      <input
+        ref={inputRef}
+        type="text"
+        value={value}
+        onChange={(e: ChangeEvent<HTMLInputElement>) => handleInput(e.target.value)}
+        onFocus={openMenu}
+        placeholder={placeholder}
+        className={CELL}
+      />
+      {open && rect && (loading || items.length > 0) && createPortal(
+        <div
+          data-firm-menu
+          style={{ position: 'fixed', top: rect.bottom + 2, left: rect.left, width: Math.max(rect.width, 220) }}
+          className="z-[1000] max-h-60 overflow-y-auto overscroll-contain rounded-md border border-line bg-surface shadow-xl"
+        >
+          {loading ? (
+            <div className="px-3 py-2 text-xs text-muted">Загрузка…</div>
+          ) : items.map(it => (
+            <button
+              key={it.id}
+              type="button"
+              onClick={() => choose(it.name)}
               className="w-full text-left px-3 py-2 text-sm text-fg hover:bg-surface-2 transition-colors"
             >
               {it.name}
@@ -364,12 +456,11 @@ export default function PaymentWidgetPage() {
                 />
               </div>
               <div className={CELLBOX}>
-                <input
-                  type="text"
+                <FirmCell
                   value={r.firm}
-                  onChange={e => patchRow(r.key, { firm: e.target.value })}
-                  placeholder="Введите название фирмы…"
-                  className={CELL}
+                  onChange={text => patchRow(r.key, { firm: text })}
+                  fetchSuggestions={q => searchFromWhomValues(token, fromWhomAttrs[r.type], q)}
+                  placeholder="Введите или выберите фирму…"
                 />
               </div>
               <div className={CELLBOX}>
