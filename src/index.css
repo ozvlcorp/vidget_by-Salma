@@ -41,19 +41,19 @@
     --accent-strong: 37 99 235;
   }
 
-  /* Root scale — kept moderate so the whole widget fits one screen (rem-based) */
-  html { font-size: 118%; }
+  /* Root scale — Roboto reads at a normal width, so a light bump is plenty */
+  html { font-size: 104%; }
   html, body { height: 100%; overflow-y: auto; }
 
   body {
     @apply bg-base text-fg antialiased;
-    font-family: 'Advent Pro', system-ui, sans-serif;
-    font-weight: 500;
+    font-family: 'Roboto', system-ui, -apple-system, 'Segoe UI', sans-serif;
+    font-weight: 400;
     transition: background-color var(--dur-medium) var(--ease-standard), color var(--dur-medium) var(--ease-standard);
   }
 
-  /* Numbers use the same font now, with tabular figures for column alignment */
-  .font-mono { font-family: 'Advent Pro', system-ui, sans-serif; font-variant-numeric: tabular-nums; font-feature-settings: 'tnum' 1, 'lnum' 1; }
+  /* Numeric cells: same Roboto face, tabular figures so columns line up */
+  .font-mono { font-family: 'Roboto', system-ui, sans-serif; font-variant-numeric: tabular-nums; font-feature-settings: 'tnum' 1, 'lnum' 1; }
 
   /* Honour reduced-motion */
   @media (prefers-reduced-motion: reduce) {

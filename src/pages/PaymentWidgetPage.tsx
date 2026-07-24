@@ -33,7 +33,7 @@ function fmtUsd(n: number): string {
 }
 
 function HeadCell({ label, className = '' }: { label: string; className?: string }) {
-  return <div className={`px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-muted border-r border-line ${className}`}>{label}</div>
+  return <div className={`px-3 py-3 text-xs font-bold uppercase tracking-wide text-fg border-r border-line ${className}`}>{label}</div>
 }
 
 // ─── Searchable dropdown cell (portal so it never gets clipped by the table) ──
