@@ -4,7 +4,8 @@ import { createPortal } from 'react-dom'
 import { Plus, X, Loader2 } from 'lucide-react'
 import {
   searchCounterparties, getOrganizations, createPaymentDocument, getCurrencies,
-  type NamedOption, type OrganizationOption, type PaymentDocType, type CurrencyRate,
+  getDocAttributes, buildFromWhomAttribute,
+  type NamedOption, type OrganizationOption, type PaymentDocType, type CurrencyRate, type DocAttribute,
 } from '../api/moysklad'
 import { useAppContext } from '../context/AppContext'
 import { ThemeToggle } from '../components/ThemeToggle'
@@ -176,6 +177,8 @@ export default function PaymentWidgetPage() {
   // The сум (UZS) currency — documents are created in сум with a conversion rate,
   // because the MoySklad accounting currency is USD.
   const [uzsCurrency, setUzsCurrency] = useState<CurrencyRate | null>(null)
+  // The "От кого" доп. поле per document type (its id differs between cashin/paymentin)
+  const [fromWhomAttrs, setFromWhomAttrs] = useState<Record<PaymentDocType, DocAttribute | null>>({ cashin: null, paymentin: null })
   const [submitting, setSubmitting] = useState(false)
   const [results, setResults] = useState<Record<string, RowResult>>({})
   const [savedCount, setSavedCount] = useState(0)
@@ -190,6 +193,14 @@ export default function PaymentWidgetPage() {
     getCurrencies(token)
       .then(cs => setUzsCurrency(cs.find(c => c.isoCode === 'UZS') ?? null))
       .catch(() => setUzsCurrency(null))
+    for (const t of ['cashin', 'paymentin'] as PaymentDocType[]) {
+      getDocAttributes(token, t)
+        .then(attrs => {
+          const found = attrs.find(a => /от\s*кого/i.test(a.name)) ?? null
+          setFromWhomAttrs(prev => ({ ...prev, [t]: found }))
+        })
+        .catch(() => { /* leave null */ })
+    }
   }, [token])
 
   function addRow() {
@@ -230,6 +241,13 @@ export default function PaymentWidgetPage() {
     const entries: Array<[string, RowResult]> = []
     for (const row of validRows) {
       try {
+        // Company name → the "От кого" доп. поле (find-or-create the value in its справочник)
+        const firmText = row.firm.trim()
+        const attr = fromWhomAttrs[row.type]
+        const attributes = firmText && attr
+          ? [await buildFromWhomAttribute(token, row.type, attr, firmText)]
+          : undefined
+
         const doc = await createPaymentDocument(token, {
           type: row.type,
           organizationId: orgId,
@@ -238,7 +256,7 @@ export default function PaymentWidgetPage() {
           // сум → document currency = сум with rate 1/Курс; доллар → base currency (no rate)
           currencyId: row.currency === 'UZS' ? uzsCurrency!.id : undefined,
           rateValue: row.currency === 'UZS' ? 1 / row.rate : undefined,
-          paymentPurpose: row.firm.trim() || undefined,
+          attributes,
           moment: `${row.date} 12:00:00`,
         })
         entries.push([row.key, { status: 'success', link: doc.uuidHref }])
