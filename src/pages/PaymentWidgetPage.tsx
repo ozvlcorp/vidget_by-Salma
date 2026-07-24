@@ -11,12 +11,15 @@ import { ThemeToggle } from '../components/ThemeToggle'
 import { GroupedNumberInput } from '../components/GroupedNumberInput'
 
 // ─── Table model ────────────────────────────────────────────────────────────
+type Cur = 'UZS' | 'USD'   // сум или доллар
+
 interface Row {
   key: string
   date: string          // YYYY-MM-DD
   firm: string          // название фирмы — свободный ввод (нет в МоемСкладе)
-  amount: number        // в валюте (сум)
-  rate: number          // курс
+  currency: Cur         // валюта суммы: сум или доллар
+  amount: number        // сумма в выбранной валюте
+  rate: number          // курс (только для сум)
   client: NamedOption | null   // контрагент из МоегоСклада
   type: PaymentDocType         // 'cashin' | 'paymentin'
 }
@@ -28,9 +31,14 @@ const PAYMENT_TYPES: Array<{ value: PaymentDocType; label: string }> = [
   { value: 'paymentin', label: 'Входящий платёж' },
 ]
 
+const CURRENCIES: Array<{ value: Cur; label: string }> = [
+  { value: 'UZS', label: 'сум' },
+  { value: 'USD', label: 'доллар' },
+]
+
 // Column layout — identical across header, rows and totals so everything lines up.
 // Leading 44px = Excel-style row-number gutter; trailing 40px = delete control.
-const COLS = '44px 132px 1.3fr 150px 96px 140px 1.3fr 180px 40px'
+const COLS = '44px 142px 1.2fr 92px 130px 88px 124px 1.2fr 166px 40px'
 
 const CELL = 'w-full px-2.5 py-2 text-sm bg-transparent focus:outline-none text-fg placeholder-faint'
 // Editable cell wrapper: right gridline + Excel "active cell" ring on focus.
@@ -160,7 +168,7 @@ export default function PaymentWidgetPage() {
   const nextKey = useRef(1)
 
   const [rows, setRows] = useState<Row[]>([
-    { key: 'row-0', date: todayStr(), firm: '', amount: 0, rate: 0, client: null, type: 'cashin' },
+    { key: 'row-0', date: todayStr(), firm: '', currency: 'UZS', amount: 0, rate: 0, client: null, type: 'cashin' },
   ])
 
   const [organizations, setOrganizations] = useState<OrganizationOption[] | null>(null)
@@ -186,7 +194,7 @@ export default function PaymentWidgetPage() {
 
   function addRow() {
     setSavedCount(0)
-    setRows(rs => [...rs, { key: `row-${nextKey.current++}`, date: todayStr(), firm: '', amount: 0, rate: 0, client: null, type: 'cashin' }])
+    setRows(rs => [...rs, freshRow()])
   }
   function removeRow(key: string) {
     setRows(rs => (rs.length > 1 ? rs.filter(r => r.key !== key) : rs))
@@ -197,54 +205,57 @@ export default function PaymentWidgetPage() {
     setRows(rs => rs.map(r => (r.key === key ? { ...r, ...patch } : r)))
   }
 
-  const usdOf = (r: Row) => (r.rate > 0 ? r.amount / r.rate : 0)
-  const totalAmount = rows.reduce((s, r) => s + (r.amount || 0), 0)
+  // USD equivalent: доллар → amount as-is; сум → amount / Курс.
+  const usdOf = (r: Row) => (r.currency === 'USD' ? r.amount : (r.rate > 0 ? r.amount / r.rate : 0))
   const totalUsd = rows.reduce((s, r) => s + usdOf(r), 0)
 
-  // A row is ready to save once it has a counterparty, a positive amount and a
-  // conversion rate (needed to convert сум → the USD accounting currency).
-  const validRows = rows.filter(r => r.client && r.amount > 0 && r.rate > 0)
-  const canSubmit = !submitting && !!orgId && !!uzsCurrency && validRows.length > 0
+  // A row is ready to save when it has a counterparty, a positive amount, and —
+  // for сум — a positive conversion rate (доллар is the base currency, no rate).
+  const validRows = rows.filter(r => r.client && r.amount > 0 && (r.currency === 'USD' || r.rate > 0))
+  const needsUzs = validRows.some(r => r.currency === 'UZS')
+  const canSubmit = !submitting && !!orgId && validRows.length > 0 && (!needsUzs || !!uzsCurrency)
 
   function freshRow(): Row {
-    return { key: `row-${nextKey.current++}`, date: todayStr(), firm: '', amount: 0, rate: 0, client: null, type: 'cashin' }
+    return { key: `row-${nextKey.current++}`, date: todayStr(), firm: '', currency: 'UZS', amount: 0, rate: 0, client: null, type: 'cashin' }
   }
 
   async function handleSubmit() {
-    if (!uzsCurrency) return
+    if (needsUzs && !uzsCurrency) return
     setSubmitting(true)
     setResults({})
     setSavedCount(0)
 
-    const entries = await Promise.all(validRows.map(async (row): Promise<[string, RowResult]> => {
+    // Sequential (not parallel) so MoySklad assigns sequential document numbers —
+    // concurrent creates can collide on the same number.
+    const entries: Array<[string, RowResult]> = []
+    for (const row of validRows) {
       try {
         const doc = await createPaymentDocument(token, {
           type: row.type,
           organizationId: orgId,
           agentId: row.client!.id,
-          sumMajor: row.amount,                 // в сумах
-          currencyId: uzsCurrency.id,           // валюта документа = сум (UZS)
-          rateValue: 1 / row.rate,              // 1 USD = Курс сум  →  USD за 1 сум = 1/Курс
+          sumMajor: row.amount,
+          // сум → document currency = сум with rate 1/Курс; доллар → base currency (no rate)
+          currencyId: row.currency === 'UZS' ? uzsCurrency!.id : undefined,
+          rateValue: row.currency === 'UZS' ? 1 / row.rate : undefined,
           paymentPurpose: row.firm.trim() || undefined,
           moment: `${row.date} 12:00:00`,
         })
-        return [row.key, { status: 'success', link: doc.uuidHref }]
+        entries.push([row.key, { status: 'success', link: doc.uuidHref }])
       } catch (e) {
-        return [row.key, { status: 'error', message: e instanceof Error ? e.message : String(e) }]
+        entries.push([row.key, { status: 'error', message: e instanceof Error ? e.message : String(e) }])
       }
-    }))
+    }
 
     const res = Object.fromEntries(entries)
     const errors = entries.filter(([, r]) => r.status === 'error').length
     setSubmitting(false)
 
     if (errors === 0) {
-      // Everything saved — reset the form to a single empty row.
       setRows([freshRow()])
       setResults({})
       setSavedCount(entries.length)
     } else {
-      // Keep the rows so failed ones can be fixed and re-submitted.
       setResults(res)
     }
   }
@@ -298,12 +309,13 @@ export default function PaymentWidgetPage() {
 
       {/* Grid — fills the rest of the screen */}
       <div className="flex-1 overflow-auto">
-        <div style={{ minWidth: 940 }} className="min-h-full flex flex-col">
+        <div style={{ minWidth: 1120 }} className="min-h-full flex flex-col">
           {/* Header (frozen) */}
           <div className="grid sticky top-0 z-20 bg-surface-2 border-b border-line shadow-sm" style={{ gridTemplateColumns: COLS }}>
             <div className={gutter} />
             <HeadCell label="Дата" />
             <HeadCell label="Фирма" />
+            <HeadCell label="Валюта" />
             <HeadCell label="Сумма" className="text-right" />
             <HeadCell label="Курс" className="text-right" />
             <HeadCell label="Сумма в $" className="text-right" />
@@ -343,10 +355,25 @@ export default function PaymentWidgetPage() {
                 />
               </div>
               <div className={CELLBOX}>
-                <GroupedNumberInput value={r.amount} onChange={n => patchRow(r.key, { amount: n })} placeholder="0" className={`${CELL} font-mono text-right`} />
+                <select
+                  value={r.currency}
+                  onChange={e => patchRow(r.key, { currency: e.target.value as Cur })}
+                  className={`${CELL} cursor-pointer`}
+                >
+                  {CURRENCIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+                </select>
               </div>
               <div className={CELLBOX}>
-                <GroupedNumberInput value={r.rate} onChange={n => patchRow(r.key, { rate: n })} placeholder="0" className={`${CELL} font-mono text-right`} />
+                <GroupedNumberInput value={r.amount} onChange={n => patchRow(r.key, { amount: n })} placeholder="0" className={`${CELL} font-mono text-right`} />
+              </div>
+              <div className={`${CELLBOX} ${r.currency === 'USD' ? 'bg-surface-2/60' : ''}`}>
+                <GroupedNumberInput
+                  value={r.rate}
+                  onChange={n => patchRow(r.key, { rate: n })}
+                  disabled={r.currency === 'USD'}
+                  placeholder="0"
+                  className={`${CELL} font-mono text-right disabled:cursor-not-allowed disabled:text-faint`}
+                />
               </div>
               <div className="border-r border-line bg-surface-2/40 flex items-center justify-end px-2.5">
                 <span className="font-mono text-sm text-muted tabular-nums">{fmtUsd(usdOf(r))}</span>
@@ -385,13 +412,14 @@ export default function PaymentWidgetPage() {
             style={{ gridTemplateColumns: COLS }}
           >
             <div className={gutter}><Plus size={13} /></div>
-            <div className="col-span-7 px-2.5 py-2 text-sm text-faint">Добавить строку</div>
+            <div className="col-span-8 px-2.5 py-2 text-sm text-faint">Добавить строку</div>
             <div />
           </button>
 
           {/* Blank spreadsheet canvas — continues the column gridlines to the bottom */}
           <div className="grid flex-1 bg-surface" style={{ gridTemplateColumns: COLS }} aria-hidden="true">
             <div className={gutter} />
+            <div className="border-r border-line" />
             <div className="border-r border-line" />
             <div className="border-r border-line" />
             <div className="border-r border-line" />
@@ -407,9 +435,10 @@ export default function PaymentWidgetPage() {
             <div className={gutter} />
             <div className="px-2.5 py-2.5 border-r border-line text-xs uppercase tracking-wide text-muted">Итого</div>
             <div className="border-r border-line" />
-            <div className="px-2.5 py-2.5 border-r border-line text-right font-mono text-sm text-fg tabular-nums">{totalAmount.toLocaleString('ru-RU')}</div>
             <div className="border-r border-line" />
-            <div className="px-2.5 py-2.5 border-r border-line text-right font-mono text-sm text-fg tabular-nums">{fmtUsd(totalUsd)}</div>
+            <div className="border-r border-line" />
+            <div className="border-r border-line" />
+            <div className="px-2.5 py-2.5 border-r border-line text-right font-mono text-sm text-fg tabular-nums">$ {fmtUsd(totalUsd)}</div>
             <div className="border-r border-line" />
             <div className="border-r border-line" />
             <div />
@@ -420,7 +449,7 @@ export default function PaymentWidgetPage() {
       {/* Status bar */}
       <div className="shrink-0 h-7 flex items-center gap-4 px-3 border-t border-line bg-surface-2 text-[11px] text-faint">
         <span>Строк: {rows.length}</span>
-        <span className="tabular-nums">Итого: {totalAmount.toLocaleString('ru-RU')} · $ {fmtUsd(totalUsd)}</span>
+        <span className="tabular-nums">Итого $ {fmtUsd(totalUsd)}</span>
         <div className="flex-1" />
         {savedCount > 0 && <span className="text-green-600">✓ Создано документов: {savedCount}</span>}
         {errorCount > 0 && <span className="text-red-600">Ошибок: {errorCount}</span>}

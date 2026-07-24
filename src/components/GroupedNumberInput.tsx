@@ -29,13 +29,14 @@ function parseAmount(raw: string): number {
 
 /** Thousand-grouped numeric text input (e.g. "30 000 000") that reports a plain number via onChange. */
 export function GroupedNumberInput({
-  value, onChange, placeholder, className = '', autoFocus,
+  value, onChange, placeholder, className = '', autoFocus, disabled,
 }: {
   value: number
   onChange: (n: number) => void
   placeholder?: string
   className?: string
   autoFocus?: boolean
+  disabled?: boolean
 }) {
   const [text, setText] = useState<string>(value ? formatDisplay(String(value)) : '')
   const inputRef = useRef<HTMLInputElement>(null)
@@ -84,9 +85,10 @@ export function GroupedNumberInput({
       ref={inputRef}
       type="text"
       inputMode="decimal"
-      value={text}
-      placeholder={placeholder}
+      value={disabled ? '' : text}
+      placeholder={disabled ? '—' : placeholder}
       autoFocus={autoFocus}
+      disabled={disabled}
       onChange={handleChange}
       className={className}
     />
