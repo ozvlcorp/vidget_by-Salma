@@ -1,8 +1,11 @@
 import { useState, useRef, useEffect } from 'react'
 import type { ChangeEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { Plus, X } from 'lucide-react'
-import { searchCounterparties, type NamedOption } from '../api/moysklad'
+import { Plus, X, Loader2 } from 'lucide-react'
+import {
+  searchCounterparties, getOrganizations, createPaymentDocument,
+  type NamedOption, type OrganizationOption, type PaymentDocType,
+} from '../api/moysklad'
 import { useAppContext } from '../context/AppContext'
 import { ThemeToggle } from '../components/ThemeToggle'
 import { GroupedNumberInput } from '../components/GroupedNumberInput'
@@ -15,11 +18,19 @@ interface Row {
   amount: number        // в валюте (сум)
   rate: number          // курс
   client: NamedOption | null   // контрагент из МоегоСклада
+  type: PaymentDocType         // 'cashin' | 'paymentin'
 }
+
+type RowResult = { status: 'success' | 'error'; message?: string; link?: string | null }
+
+const PAYMENT_TYPES: Array<{ value: PaymentDocType; label: string }> = [
+  { value: 'cashin', label: 'Приходный ордер' },
+  { value: 'paymentin', label: 'Входящий платёж' },
+]
 
 // Column layout — identical across header, rows and totals so everything lines up.
 // Leading 44px = Excel-style row-number gutter; trailing 40px = delete control.
-const COLS = '44px 150px 1.6fr 160px 120px 160px 1.5fr 40px'
+const COLS = '44px 132px 1.3fr 150px 96px 140px 1.3fr 180px 40px'
 
 const CELL = 'w-full px-2.5 py-2 text-sm bg-transparent focus:outline-none text-fg placeholder-faint'
 // Editable cell wrapper: right gridline + Excel "active cell" ring on focus.
@@ -147,14 +158,28 @@ export default function PaymentWidgetPage() {
   const nextKey = useRef(1)
 
   const [rows, setRows] = useState<Row[]>([
-    { key: 'row-0', date: todayStr(), firm: '', amount: 0, rate: 0, client: null },
+    { key: 'row-0', date: todayStr(), firm: '', amount: 0, rate: 0, client: null, type: 'cashin' },
   ])
 
+  const [organizations, setOrganizations] = useState<OrganizationOption[] | null>(null)
+  const [orgId, setOrgId] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [results, setResults] = useState<Record<string, RowResult>>({})
+
+  useEffect(() => {
+    getOrganizations(token).then(setOrganizations).catch(() => setOrganizations([]))
+  }, [token])
+
+  useEffect(() => {
+    if (organizations && organizations.length > 0 && !orgId) setOrgId(organizations[0].id)
+  }, [organizations, orgId])
+
   function addRow() {
-    setRows(rs => [...rs, { key: `row-${nextKey.current++}`, date: todayStr(), firm: '', amount: 0, rate: 0, client: null }])
+    setRows(rs => [...rs, { key: `row-${nextKey.current++}`, date: todayStr(), firm: '', amount: 0, rate: 0, client: null, type: 'cashin' }])
   }
   function removeRow(key: string) {
     setRows(rs => (rs.length > 1 ? rs.filter(r => r.key !== key) : rs))
+    setResults(rs => { if (!(key in rs)) return rs; const n = { ...rs }; delete n[key]; return n })
   }
   function patchRow(key: string, patch: Partial<Row>) {
     setRows(rs => rs.map(r => (r.key === key ? { ...r, ...patch } : r)))
@@ -164,6 +189,34 @@ export default function PaymentWidgetPage() {
   const totalAmount = rows.reduce((s, r) => s + (r.amount || 0), 0)
   const totalUsd = rows.reduce((s, r) => s + usdOf(r), 0)
 
+  // A row is ready to save once it has a counterparty and a positive amount.
+  const validRows = rows.filter(r => r.client && r.amount > 0)
+  const canSubmit = !submitting && !!orgId && validRows.length > 0
+
+  async function handleSubmit() {
+    setSubmitting(true)
+    setResults({})
+    await Promise.all(validRows.map(async row => {
+      try {
+        const doc = await createPaymentDocument(token, {
+          type: row.type,
+          organizationId: orgId,
+          agentId: row.client!.id,
+          sumMajor: row.amount,
+          paymentPurpose: row.firm.trim() || undefined,
+          moment: `${row.date} 12:00:00`,
+        })
+        setResults(prev => ({ ...prev, [row.key]: { status: 'success', link: doc.uuidHref } }))
+      } catch (e) {
+        setResults(prev => ({ ...prev, [row.key]: { status: 'error', message: e instanceof Error ? e.message : String(e) } }))
+      }
+    }))
+    setSubmitting(false)
+  }
+
+  const successCount = Object.values(results).filter(r => r.status === 'success').length
+  const errorCount = Object.values(results).filter(r => r.status === 'error').length
+
   const gutter = 'flex items-center justify-center bg-surface-2 border-r border-line text-xs text-faint font-mono select-none'
 
   return (
@@ -172,6 +225,23 @@ export default function PaymentWidgetPage() {
       <div className="shrink-0 h-12 flex items-center gap-2 px-3 border-b border-line bg-surface">
         <span className="font-bold text-sm tracking-tight">Разбивка платежа</span>
         <div className="flex-1" />
+        {/* Юр. лицо (organization) — applied to every created document */}
+        <label className="hidden sm:flex items-center gap-1.5 text-xs text-muted">
+          Юр. лицо:
+          {organizations === null ? (
+            <span className="text-faint">загрузка…</span>
+          ) : organizations.length === 0 ? (
+            <span className="text-faint">не найдено</span>
+          ) : (
+            <select
+              value={orgId}
+              onChange={e => setOrgId(e.target.value)}
+              className="h-8 max-w-[220px] px-2 rounded-md border border-line bg-surface text-fg text-xs"
+            >
+              {organizations.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+            </select>
+          )}
+        </label>
         <button
           type="button"
           onClick={addRow}
@@ -181,11 +251,12 @@ export default function PaymentWidgetPage() {
         </button>
         <button
           type="button"
-          disabled
-          title="Демо-режим: интеграция с МойСклад появится позже"
-          className="h-8 px-4 rounded-md bg-accent text-white text-xs font-semibold disabled:opacity-40"
+          onClick={handleSubmit}
+          disabled={!canSubmit}
+          className="flex items-center gap-1.5 h-8 px-4 rounded-md bg-accent text-white text-xs font-semibold hover:bg-accent-strong transition-all disabled:opacity-40"
         >
-          Создать документы
+          {submitting && <Loader2 size={13} className="animate-spin" />}
+          {submitting ? 'Создание…' : 'Создать документы'}
         </button>
         <div className="w-px h-6 bg-line mx-1" />
         <ThemeToggle />
@@ -203,13 +274,23 @@ export default function PaymentWidgetPage() {
             <HeadCell label="Курс" className="text-right" />
             <HeadCell label="Сумма в $" className="text-right" />
             <HeadCell label="Контрагенты" />
+            <HeadCell label="Тип" />
             <div className="border-line" />
           </div>
 
           {/* Rows */}
-          {rows.map((r, i) => (
+          {rows.map((r, i) => {
+            const res = results[r.key]
+            const gutterState = res?.status === 'success'
+              ? 'bg-green-500/15 text-green-600'
+              : res?.status === 'error'
+                ? 'bg-red-500/15 text-red-600'
+                : ''
+            return (
             <div key={r.key} className="grid border-b border-line bg-surface hover:bg-surface-2/40 transition-colors" style={{ gridTemplateColumns: COLS }}>
-              <div className={gutter}>{i + 1}</div>
+              <div className={`${gutter} ${gutterState}`} title={res?.message}>
+                {res?.status === 'success' ? '✓' : res?.status === 'error' ? '✕' : i + 1}
+              </div>
               <div className={CELLBOX}>
                 <input
                   type="date"
@@ -239,6 +320,15 @@ export default function PaymentWidgetPage() {
               <div className={CELLBOX}>
                 <SearchCell value={r.client} onSelect={opt => patchRow(r.key, { client: opt })} fetch={searchCounterparties} token={token} placeholder="Выберите контрагента…" />
               </div>
+              <div className={CELLBOX}>
+                <select
+                  value={r.type}
+                  onChange={e => patchRow(r.key, { type: e.target.value as PaymentDocType })}
+                  className={`${CELL} cursor-pointer`}
+                >
+                  {PAYMENT_TYPES.map(pt => <option key={pt.value} value={pt.value}>{pt.label}</option>)}
+                </select>
+              </div>
               <div className="flex items-center justify-center bg-surface">
                 <button
                   type="button"
@@ -251,7 +341,7 @@ export default function PaymentWidgetPage() {
                 </button>
               </div>
             </div>
-          ))}
+          )})}
 
           {/* Add-row strip */}
           <button
@@ -261,13 +351,14 @@ export default function PaymentWidgetPage() {
             style={{ gridTemplateColumns: COLS }}
           >
             <div className={gutter}><Plus size={13} /></div>
-            <div className="col-span-6 px-2.5 py-2 text-sm text-faint">Добавить строку</div>
+            <div className="col-span-7 px-2.5 py-2 text-sm text-faint">Добавить строку</div>
             <div />
           </button>
 
           {/* Blank spreadsheet canvas — continues the column gridlines to the bottom */}
           <div className="grid flex-1 bg-surface" style={{ gridTemplateColumns: COLS }} aria-hidden="true">
             <div className={gutter} />
+            <div className="border-r border-line" />
             <div className="border-r border-line" />
             <div className="border-r border-line" />
             <div className="border-r border-line" />
@@ -286,6 +377,7 @@ export default function PaymentWidgetPage() {
             <div className="border-r border-line" />
             <div className="px-2.5 py-2.5 border-r border-line text-right font-mono text-sm text-fg tabular-nums">{fmtUsd(totalUsd)}</div>
             <div className="border-r border-line" />
+            <div className="border-r border-line" />
             <div />
           </div>
         </div>
@@ -296,7 +388,9 @@ export default function PaymentWidgetPage() {
         <span>Строк: {rows.length}</span>
         <span className="tabular-nums">Итого: {totalAmount.toLocaleString('ru-RU')} · $ {fmtUsd(totalUsd)}</span>
         <div className="flex-1" />
-        <span>Демо-режим · данные не отправляются в МойСклад</span>
+        {successCount > 0 && <span className="text-green-600">Создано: {successCount}</span>}
+        {errorCount > 0 && <span className="text-red-600">Ошибок: {errorCount}</span>}
+        {successCount === 0 && errorCount === 0 && <span>Готово к отправке в МойСклад</span>}
       </div>
     </div>
   )
