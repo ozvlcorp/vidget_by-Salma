@@ -18,9 +18,12 @@ interface Row {
 }
 
 // Column layout — identical across header, rows and totals so everything lines up.
-const COLS = '150px 1.5fr 160px 110px 160px 1.4fr 40px'
+// Leading 44px = Excel-style row-number gutter; trailing 40px = delete control.
+const COLS = '44px 150px 1.6fr 160px 120px 160px 1.5fr 40px'
 
-const CELL = 'w-full px-2 py-2.5 text-sm bg-transparent focus:outline-none focus:bg-accent/5 text-fg placeholder-faint'
+const CELL = 'w-full px-2.5 py-2 text-sm bg-transparent focus:outline-none text-fg placeholder-faint'
+// Editable cell wrapper: right gridline + Excel "active cell" ring on focus.
+const CELLBOX = 'relative border-r border-line focus-within:z-10 focus-within:ring-2 focus-within:ring-accent focus-within:ring-inset'
 
 function todayStr(): string {
   const d = new Date()
@@ -33,7 +36,7 @@ function fmtUsd(n: number): string {
 }
 
 function HeadCell({ label, className = '' }: { label: string; className?: string }) {
-  return <div className={`px-3 py-3 text-xs font-bold uppercase tracking-wide text-fg border-r border-line ${className}`}>{label}</div>
+  return <div className={`px-2.5 py-2.5 text-xs font-bold uppercase tracking-wide text-fg border-r border-line ${className}`}>{label}</div>
 }
 
 // ─── Searchable dropdown cell (portal so it never gets clipped by the table) ──
@@ -116,7 +119,7 @@ function SearchCell({
         <div
           data-search-menu
           style={{ position: 'fixed', top: rect.bottom + 2, left: rect.left, width: Math.max(rect.width, 200) }}
-          className="z-[1000] max-h-60 overflow-y-auto overscroll-contain rounded-lg border border-line bg-surface shadow-xl"
+          className="z-[1000] max-h-60 overflow-y-auto overscroll-contain rounded-md border border-line bg-surface shadow-xl"
         >
           {loading ? (
             <div className="px-3 py-2 text-xs text-muted">Загрузка…</div>
@@ -161,131 +164,134 @@ export default function PaymentWidgetPage() {
   const totalAmount = rows.reduce((s, r) => s + (r.amount || 0), 0)
   const totalUsd = rows.reduce((s, r) => s + usdOf(r), 0)
 
+  const gutter = 'flex items-center justify-center bg-surface-2 border-r border-line text-xs text-faint font-mono select-none'
+
   return (
-    <div className="fabric-bg h-screen flex flex-col overflow-hidden">
-      <header className="shrink-0 bg-surface/70 backdrop-blur-md border-b border-line">
-        <div className="px-6 h-14 flex items-center gap-4">
-          <span className="m3-title-large text-fg">Разбивка платежа</span>
-          <div className="flex-1" />
-          <ThemeToggle />
-        </div>
-      </header>
+    <div className="h-screen flex flex-col overflow-hidden bg-base text-fg">
+      {/* Toolbar */}
+      <div className="shrink-0 h-12 flex items-center gap-2 px-3 border-b border-line bg-surface">
+        <span className="font-bold text-sm tracking-tight">Разбивка платежа</span>
+        <div className="flex-1" />
+        <button
+          type="button"
+          onClick={addRow}
+          className="flex items-center gap-1.5 h-8 px-3 rounded-md border border-line text-xs font-medium text-muted hover:border-accent hover:text-accent transition-all"
+        >
+          <Plus size={14} /> Строка
+        </button>
+        <button
+          type="button"
+          disabled
+          title="Демо-режим: интеграция с МойСклад появится позже"
+          className="h-8 px-4 rounded-md bg-accent text-white text-xs font-semibold disabled:opacity-40"
+        >
+          Создать документы
+        </button>
+        <div className="w-px h-6 bg-line mx-1" />
+        <ThemeToggle />
+      </div>
 
-      <main className="flex-1 overflow-auto p-5">
-        <div className="max-w-6xl mx-auto space-y-4">
-
-          <div className="overflow-x-auto rounded-xl border border-line card-shadow bg-surface">
-            <div style={{ minWidth: 980 }}>
-              {/* Header */}
-              <div className="grid bg-surface-2 border-b border-line" style={{ gridTemplateColumns: COLS }}>
-                <HeadCell label="Дата" />
-                <HeadCell label="Фирма" />
-                <HeadCell label="Сумма" className="text-right" />
-                <HeadCell label="Курс" className="text-right" />
-                <HeadCell label="Сумма в $" className="text-right" />
-                <HeadCell label="Клиент" />
-                <div className="border-line" />
-              </div>
-
-              {/* Rows */}
-              {rows.map(r => (
-                <div key={r.key} className="grid border-b border-line hover:bg-surface-2/40 transition-colors" style={{ gridTemplateColumns: COLS }}>
-                  <div className="border-r border-line">
-                    <input
-                      type="date"
-                      value={r.date}
-                      onChange={e => patchRow(r.key, { date: e.target.value })}
-                      className={`${CELL} font-mono`}
-                    />
-                  </div>
-                  <div className="border-r border-line">
-                    <SearchCell
-                      value={r.firm}
-                      onSelect={opt => patchRow(r.key, { firm: opt })}
-                      fetch={searchFirms}
-                      token={token}
-                      placeholder="Выберите фирму…"
-                    />
-                  </div>
-                  <div className="border-r border-line">
-                    <GroupedNumberInput
-                      value={r.amount}
-                      onChange={n => patchRow(r.key, { amount: n })}
-                      placeholder="0"
-                      className={`${CELL} font-mono text-right`}
-                    />
-                  </div>
-                  <div className="border-r border-line">
-                    <GroupedNumberInput
-                      value={r.rate}
-                      onChange={n => patchRow(r.key, { rate: n })}
-                      placeholder="0"
-                      className={`${CELL} font-mono text-right`}
-                    />
-                  </div>
-                  <div className="border-r border-line bg-surface-2/40 flex items-center justify-end px-3">
-                    <span className="font-mono text-sm text-muted tabular-nums">{fmtUsd(usdOf(r))}</span>
-                  </div>
-                  <div className="border-r border-line">
-                    <SearchCell
-                      value={r.client}
-                      onSelect={opt => patchRow(r.key, { client: opt })}
-                      fetch={searchClients}
-                      token={token}
-                      placeholder="Выберите клиента…"
-                    />
-                  </div>
-                  <div className="flex items-center justify-center">
-                    <button
-                      type="button"
-                      onClick={() => removeRow(r.key)}
-                      disabled={rows.length === 1}
-                      title="Удалить строку"
-                      className="w-7 h-7 rounded-md flex items-center justify-center text-faint hover:text-red-500 hover:bg-red-500/10 transition-all disabled:opacity-30 disabled:hover:text-faint disabled:hover:bg-transparent"
-                    >
-                      <X size={15} />
-                    </button>
-                  </div>
-                </div>
-              ))}
-
-              {/* Totals */}
-              <div className="grid bg-surface-2 font-semibold" style={{ gridTemplateColumns: COLS }}>
-                <div className="px-3 py-2.5 border-r border-line text-xs uppercase tracking-wide text-muted">Итого</div>
-                <div className="border-r border-line" />
-                <div className="px-3 py-2.5 border-r border-line text-right font-mono text-sm text-fg tabular-nums">{totalAmount.toLocaleString('ru-RU')}</div>
-                <div className="border-r border-line" />
-                <div className="px-3 py-2.5 border-r border-line text-right font-mono text-sm text-fg tabular-nums">{fmtUsd(totalUsd)}</div>
-                <div className="border-r border-line" />
-                <div />
-              </div>
-            </div>
+      {/* Grid — fills the rest of the screen */}
+      <div className="flex-1 overflow-auto">
+        <div style={{ minWidth: 940 }} className="min-h-full flex flex-col">
+          {/* Header (frozen) */}
+          <div className="grid sticky top-0 z-20 bg-surface-2 border-b border-line shadow-sm" style={{ gridTemplateColumns: COLS }}>
+            <div className={gutter} />
+            <HeadCell label="Дата" />
+            <HeadCell label="Фирма" />
+            <HeadCell label="Сумма" className="text-right" />
+            <HeadCell label="Курс" className="text-right" />
+            <HeadCell label="Сумма в $" className="text-right" />
+            <HeadCell label="Клиент" />
+            <div className="border-line" />
           </div>
 
-          {/* Add row */}
+          {/* Rows */}
+          {rows.map((r, i) => (
+            <div key={r.key} className="grid border-b border-line bg-surface hover:bg-surface-2/40 transition-colors" style={{ gridTemplateColumns: COLS }}>
+              <div className={gutter}>{i + 1}</div>
+              <div className={CELLBOX}>
+                <input
+                  type="date"
+                  value={r.date}
+                  onChange={e => patchRow(r.key, { date: e.target.value })}
+                  className={`${CELL} font-mono`}
+                />
+              </div>
+              <div className={CELLBOX}>
+                <SearchCell value={r.firm} onSelect={opt => patchRow(r.key, { firm: opt })} fetch={searchFirms} token={token} placeholder="Выберите фирму…" />
+              </div>
+              <div className={CELLBOX}>
+                <GroupedNumberInput value={r.amount} onChange={n => patchRow(r.key, { amount: n })} placeholder="0" className={`${CELL} font-mono text-right`} />
+              </div>
+              <div className={CELLBOX}>
+                <GroupedNumberInput value={r.rate} onChange={n => patchRow(r.key, { rate: n })} placeholder="0" className={`${CELL} font-mono text-right`} />
+              </div>
+              <div className="border-r border-line bg-surface-2/40 flex items-center justify-end px-2.5">
+                <span className="font-mono text-sm text-muted tabular-nums">{fmtUsd(usdOf(r))}</span>
+              </div>
+              <div className={CELLBOX}>
+                <SearchCell value={r.client} onSelect={opt => patchRow(r.key, { client: opt })} fetch={searchClients} token={token} placeholder="Выберите клиента…" />
+              </div>
+              <div className="flex items-center justify-center bg-surface">
+                <button
+                  type="button"
+                  onClick={() => removeRow(r.key)}
+                  disabled={rows.length === 1}
+                  title="Удалить строку"
+                  className="w-7 h-7 rounded flex items-center justify-center text-faint hover:text-red-500 hover:bg-red-500/10 transition-all disabled:opacity-30 disabled:hover:text-faint disabled:hover:bg-transparent"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            </div>
+          ))}
+
+          {/* Add-row strip */}
           <button
             type="button"
             onClick={addRow}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-line text-sm text-muted hover:border-accent hover:text-accent transition-all"
+            className="grid w-full text-left border-b border-line bg-surface hover:bg-surface-2/50 transition-colors"
+            style={{ gridTemplateColumns: COLS }}
           >
-            <Plus size={15} />
-            Добавить строку
+            <div className={gutter}><Plus size={13} /></div>
+            <div className="col-span-6 px-2.5 py-2 text-sm text-faint">Добавить строку</div>
+            <div />
           </button>
 
-          <div className="pt-2 flex flex-col gap-2">
-            <button
-              type="button"
-              disabled
-              className="w-full sm:w-auto px-6 py-3 rounded-xl bg-accent text-white font-semibold text-sm disabled:opacity-40"
-            >
-              Создать документы
-            </button>
-            <p className="text-xs text-faint">
-              Демо-режим: данные пока не отправляются в МойСклад. Списки «Фирма» и «Клиент» заполнены тестовыми данными.
-            </p>
+          {/* Blank spreadsheet canvas — continues the column gridlines to the bottom */}
+          <div className="grid flex-1 bg-surface" style={{ gridTemplateColumns: COLS }} aria-hidden="true">
+            <div className={gutter} />
+            <div className="border-r border-line" />
+            <div className="border-r border-line" />
+            <div className="border-r border-line" />
+            <div className="border-r border-line" />
+            <div className="border-r border-line" />
+            <div className="border-r border-line" />
+            <div />
+          </div>
+
+          {/* Totals (frozen at bottom) */}
+          <div className="grid sticky bottom-0 z-20 bg-surface-2 border-t border-line font-semibold" style={{ gridTemplateColumns: COLS }}>
+            <div className={gutter} />
+            <div className="px-2.5 py-2.5 border-r border-line text-xs uppercase tracking-wide text-muted">Итого</div>
+            <div className="border-r border-line" />
+            <div className="px-2.5 py-2.5 border-r border-line text-right font-mono text-sm text-fg tabular-nums">{totalAmount.toLocaleString('ru-RU')}</div>
+            <div className="border-r border-line" />
+            <div className="px-2.5 py-2.5 border-r border-line text-right font-mono text-sm text-fg tabular-nums">{fmtUsd(totalUsd)}</div>
+            <div className="border-r border-line" />
+            <div />
           </div>
         </div>
-      </main>
+      </div>
+
+      {/* Status bar */}
+      <div className="shrink-0 h-7 flex items-center gap-4 px-3 border-t border-line bg-surface-2 text-[11px] text-faint">
+        <span>Строк: {rows.length}</span>
+        <span className="tabular-nums">Итого: {totalAmount.toLocaleString('ru-RU')} · $ {fmtUsd(totalUsd)}</span>
+        <div className="flex-1" />
+        <span>Демо-режим · данные не отправляются в МойСклад</span>
+      </div>
     </div>
   )
 }
