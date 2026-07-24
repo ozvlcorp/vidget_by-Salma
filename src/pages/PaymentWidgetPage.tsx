@@ -1,467 +1,290 @@
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import type { ChangeEvent } from 'react'
-import { Plus, Trash2, ExternalLink, CheckCircle2, XCircle, Loader2 } from 'lucide-react'
-import {
-  getOrganizations, getCurrencies, searchCounterparties, createPaymentDocument,
-  getDocAttributes, buildFromWhomAttribute, msDate,
-  type OrganizationOption, type CounterpartyOption, type PaymentDocType, type DocAttribute,
-} from '../api/moysklad'
+import { createPortal } from 'react-dom'
+import { Plus, X } from 'lucide-react'
+import { searchFirms, searchClients, type NamedOption } from '../api/moysklad'
 import { useAppContext } from '../context/AppContext'
-import { t } from '../i18n'
-import type { Lang } from '../i18n'
-import { LangSwitcher } from '../components/LangSwitcher'
 import { ThemeToggle } from '../components/ThemeToggle'
 import { GroupedNumberInput } from '../components/GroupedNumberInput'
-import { Skeleton } from '../components/Skeleton'
 
-interface SplitRow {
+// ─── Table model ────────────────────────────────────────────────────────────
+interface Row {
   key: string
-  agent: CounterpartyOption | null
-  amount: number
+  date: string          // YYYY-MM-DD
+  firm: NamedOption | null
+  amount: number        // в валюте (сум)
+  rate: number          // курс
+  client: NamedOption | null
 }
 
-type RowResult = { status: 'success' | 'error'; message?: string; link?: string | null }
+// Column layout — identical across header, rows and totals so everything lines up.
+const COLS = '150px 1.5fr 160px 110px 160px 1.4fr 40px'
 
-const INPUT_CLS = 'w-full px-3 py-2 text-sm rounded-lg border border-line focus:outline-none focus:border-accent text-fg placeholder-faint bg-surface/60'
+const CELL = 'w-full px-2 py-2.5 text-sm bg-transparent focus:outline-none focus:bg-accent/5 text-fg placeholder-faint'
 
-// ─── Counterparty autocomplete — module-level to avoid the remount-on-render bug ──
-function CounterpartyCombobox({
-  token, selected, onSelect, lang,
+function todayStr(): string {
+  const d = new Date()
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+}
+
+function fmtUsd(n: number): string {
+  return n.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+function HeadCell({ label, className = '' }: { label: string; className?: string }) {
+  return <div className={`px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-muted border-r border-line ${className}`}>{label}</div>
+}
+
+// ─── Searchable dropdown cell (portal so it never gets clipped by the table) ──
+function SearchCell({
+  value, onSelect, fetch, token, placeholder,
 }: {
+  value: NamedOption | null
+  onSelect: (opt: NamedOption | null) => void
+  fetch: (token: string, query: string) => Promise<NamedOption[]>
   token: string
-  selected: CounterpartyOption | null
-  onSelect: (opt: CounterpartyOption | null) => void
-  lang: Lang
+  placeholder: string
 }) {
-  const [query, setQuery] = useState(selected?.name ?? '')
-  const [suggestions, setSuggestions] = useState<CounterpartyOption[]>([])
+  const [query, setQuery] = useState(value?.name ?? '')
   const [open, setOpen] = useState(false)
-  const [searching, setSearching] = useState(false)
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const containerRef = useRef<HTMLDivElement>(null)
+  const [items, setItems] = useState<NamedOption[]>([])
+  const [loading, setLoading] = useState(false)
+  const [rect, setRect] = useState<DOMRect | null>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const debounce = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  useEffect(() => {
-    function onDocClick(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener('mousedown', onDocClick)
-    return () => document.removeEventListener('mousedown', onDocClick)
-  }, [])
+  function runSearch(q: string) {
+    if (debounce.current) clearTimeout(debounce.current)
+    setLoading(true)
+    debounce.current = setTimeout(() => {
+      fetch(token, q).then(setItems).finally(() => setLoading(false))
+    }, 200)
+  }
 
-  function runSearch(v: string) {
-    if (debounceRef.current) clearTimeout(debounceRef.current)
-    setSearching(true)
-    debounceRef.current = setTimeout(() => {
-      searchCounterparties(token, v)
-        .then(setSuggestions)
-        .finally(() => setSearching(false))
-    }, 300)
+  function openMenu() {
+    if (inputRef.current) setRect(inputRef.current.getBoundingClientRect())
+    setOpen(true)
+    runSearch(query)
   }
 
   function handleInput(v: string) {
     setQuery(v)
     onSelect(null)
+    if (inputRef.current) setRect(inputRef.current.getBoundingClientRect())
     setOpen(true)
-    runSearch(v)  // empty query → initial list, otherwise search
+    runSearch(v)
   }
 
-  function handleFocus() {
-    setOpen(true)
-    // Populate an initial list on first focus so the user sees options without typing
-    if (suggestions.length === 0 && !searching) runSearch(query)
+  function choose(opt: NamedOption) {
+    onSelect(opt)
+    setQuery(opt.name)
+    setOpen(false)
   }
+
+  useEffect(() => {
+    if (!open) return
+    function onDocDown(e: MouseEvent) {
+      const target = e.target as HTMLElement
+      if (inputRef.current && !inputRef.current.contains(target) && !target.closest('[data-search-menu]')) {
+        setOpen(false)
+      }
+    }
+    function onScrollResize() { setOpen(false) }
+    document.addEventListener('mousedown', onDocDown)
+    document.addEventListener('scroll', onScrollResize, true)
+    window.addEventListener('resize', onScrollResize)
+    return () => {
+      document.removeEventListener('mousedown', onDocDown)
+      document.removeEventListener('scroll', onScrollResize, true)
+      window.removeEventListener('resize', onScrollResize)
+    }
+  }, [open])
 
   return (
-    <div ref={containerRef} className="relative">
+    <>
       <input
+        ref={inputRef}
         type="text"
         value={query}
         onChange={(e: ChangeEvent<HTMLInputElement>) => handleInput(e.target.value)}
-        onFocus={handleFocus}
-        placeholder={t(lang, 'pwSearchCounterparty')}
-        className={INPUT_CLS}
+        onFocus={openMenu}
+        placeholder={placeholder}
+        className={CELL}
       />
-      {open && (
-        <div className="absolute z-30 mt-1 w-full max-h-56 overflow-y-auto overscroll-contain rounded-lg border border-line bg-surface shadow-lg">
-          {searching ? (
-            <div className="px-3 py-2 text-xs text-muted">{t(lang, 'loading')}</div>
-          ) : suggestions.length === 0 ? (
-            <div className="px-3 py-2 text-xs text-faint">{t(lang, 'pwNoCounterpartyResults')}</div>
-          ) : suggestions.map(s => (
+      {open && rect && createPortal(
+        <div
+          data-search-menu
+          style={{ position: 'fixed', top: rect.bottom + 2, left: rect.left, width: Math.max(rect.width, 200) }}
+          className="z-[1000] max-h-60 overflow-y-auto overscroll-contain rounded-lg border border-line bg-surface shadow-xl"
+        >
+          {loading ? (
+            <div className="px-3 py-2 text-xs text-muted">Загрузка…</div>
+          ) : items.length === 0 ? (
+            <div className="px-3 py-2 text-xs text-faint">Ничего не найдено</div>
+          ) : items.map(it => (
             <button
-              key={s.id}
+              key={it.id}
               type="button"
-              onClick={() => { onSelect(s); setQuery(s.name); setOpen(false) }}
+              onClick={() => choose(it)}
               className="w-full text-left px-3 py-2 text-sm text-fg hover:bg-surface-2 transition-colors"
             >
-              {s.name}
+              {it.name}
             </button>
           ))}
-        </div>
+        </div>,
+        document.body,
       )}
-    </div>
+    </>
   )
 }
 
 export default function PaymentWidgetPage() {
-  const { token, lang, currencies, setCurrencies } = useAppContext()
-
-  const [organizations, setOrganizations] = useState<OrganizationOption[] | null>(null)
-  const [orgId, setOrgId] = useState('')
-  const [docType, setDocType] = useState<PaymentDocType>('cashin')
-  const [totalAmount, setTotalAmount] = useState(0)
-  const [currencyIso, setCurrencyIso] = useState('')
-  const [paymentPurpose, setPaymentPurpose] = useState('')
-  const [fromWhom, setFromWhom] = useState('')
-
-  // Manual exchange-rate override. `rateInput` is pre-filled with the directory rate;
-  // `rateEdited` marks that the client changed it, so we only override then.
-  const [rateInput, setRateInput] = useState(0)
-  const [rateEdited, setRateEdited] = useState(false)
-
-  // "От кого" custom attribute for the currently selected doc type (null if the field isn't defined there)
-  const [fromWhomAttr, setFromWhomAttr] = useState<DocAttribute | null>(null)
-
+  const { token } = useAppContext()
   const nextKey = useRef(1)
-  const [rows, setRows] = useState<SplitRow[]>([{ key: 'row-0', agent: null, amount: 0 }])
 
-  const [submitting, setSubmitting] = useState(false)
-  const [submitError, setSubmitError] = useState<string | null>(null)
-  const [results, setResults] = useState<Record<string, RowResult>>({})
-
-  useEffect(() => {
-    getOrganizations(token).then(setOrganizations).catch(() => setOrganizations([]))
-    if (currencies.length === 0) getCurrencies(token).then(setCurrencies).catch(() => {})
-  }, [token]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Resolve the "От кого" доп. поле for the chosen document type (id/type differ per type)
-  useEffect(() => {
-    let cancelled = false
-    getDocAttributes(token, docType)
-      .then(attrs => {
-        if (cancelled) return
-        const found = attrs.find(a => /от\s*кого/i.test(a.name))
-        setFromWhomAttr(found ?? null)
-      })
-      .catch(() => { if (!cancelled) setFromWhomAttr(null) })
-    return () => { cancelled = true }
-  }, [token, docType])
-
-  useEffect(() => {
-    if (organizations && organizations.length > 0 && !orgId) setOrgId(organizations[0].id)
-  }, [organizations, orgId])
-
-  useEffect(() => {
-    if (currencies.length > 0 && !currencyIso) {
-      setCurrencyIso((currencies.find(c => c.isDefault) ?? currencies[0]).isoCode)
-    }
-  }, [currencies, currencyIso])
-
-  // On currency change, pre-fill the rate with the directory value and reset the edited flag
-  useEffect(() => {
-    const cur = currencies.find(c => c.isoCode === currencyIso)
-    setRateInput(cur && !cur.isDefault ? cur.rate : 0)
-    setRateEdited(false)
-  }, [currencyIso, currencies])
+  const [rows, setRows] = useState<Row[]>([
+    { key: 'row-0', date: todayStr(), firm: null, amount: 0, rate: 0, client: null },
+  ])
 
   function addRow() {
-    setRows(rs => [...rs, { key: `row-${nextKey.current++}`, agent: null, amount: 0 }])
+    setRows(rs => [...rs, { key: `row-${nextKey.current++}`, date: todayStr(), firm: null, amount: 0, rate: 0, client: null }])
   }
   function removeRow(key: string) {
     setRows(rs => (rs.length > 1 ? rs.filter(r => r.key !== key) : rs))
-    setResults(rs => {
-      if (!(key in rs)) return rs
-      const next = { ...rs }
-      delete next[key]
-      return next
-    })
   }
-  function patchRow(key: string, patch: Partial<SplitRow>) {
+  function patchRow(key: string, patch: Partial<Row>) {
     setRows(rs => rs.map(r => (r.key === key ? { ...r, ...patch } : r)))
   }
 
-  const distributed = useMemo(() => rows.reduce((s, r) => s + (r.amount > 0 ? r.amount : 0), 0), [rows])
-  const remaining = totalAmount - distributed
-  const validRows = useMemo(() => rows.filter(r => r.agent && r.amount > 0), [rows])
-
-  const selectedCurrency = currencies.find(c => c.isoCode === currencyIso)
-  const baseIso = currencies.find(c => c.isDefault)?.isoCode ?? ''
-  const canSubmit = !submitting && !!orgId && validRows.length > 0
-
-  async function handleSubmit() {
-    setSubmitting(true)
-    setResults({})
-    setSubmitError(null)
-    const momentStr = msDate(new Date())
-
-    const cur = selectedCurrency
-    const isDefault = !cur || cur.isDefault
-    // Only override the rate when the client actually changed it; otherwise omit it
-    // so MoySklad applies the current rate from its currency directory.
-    const overrideRate = !isDefault && rateEdited && rateInput > 0 ? rateInput : undefined
-
-    // Build the "От кого" attribute once (find-or-create dictionary element if needed).
-    // Abort the whole submit if it can't be built — otherwise docs would be created without the source.
-    const fromWhomTrim = fromWhom.trim()
-    let attributes: Array<Record<string, unknown>> | undefined
-    if (fromWhomTrim && fromWhomAttr) {
-      try {
-        attributes = [await buildFromWhomAttribute(token, docType, fromWhomAttr, fromWhomTrim)]
-      } catch (e) {
-        setSubmitError(e instanceof Error ? e.message : String(e))
-        setSubmitting(false)
-        return
-      }
-    }
-
-    await Promise.all(validRows.map(async row => {
-      try {
-        const doc = await createPaymentDocument(token, {
-          type: docType,
-          organizationId: orgId,
-          agentId: row.agent!.id,
-          sumMajor: row.amount,
-          currencyId: isDefault ? undefined : cur!.id,
-          rateValue: overrideRate,
-          paymentPurpose: paymentPurpose.trim() || undefined,
-          moment: momentStr,
-          attributes,
-        })
-        setResults(prev => ({ ...prev, [row.key]: { status: 'success', link: doc.uuidHref } }))
-      } catch (e) {
-        setResults(prev => ({ ...prev, [row.key]: { status: 'error', message: e instanceof Error ? e.message : String(e) } }))
-      }
-    }))
-    setSubmitting(false)
-  }
+  const usdOf = (r: Row) => (r.rate > 0 ? r.amount / r.rate : 0)
+  const totalAmount = rows.reduce((s, r) => s + (r.amount || 0), 0)
+  const totalUsd = rows.reduce((s, r) => s + usdOf(r), 0)
 
   return (
     <div className="fabric-bg h-screen flex flex-col overflow-hidden">
       <header className="shrink-0 bg-surface/70 backdrop-blur-md border-b border-line">
         <div className="px-6 h-14 flex items-center gap-4">
-          <span className="m3-title-large text-fg">{t(lang, 'pwTitle')}</span>
+          <span className="m3-title-large text-fg">Разбивка платежа</span>
           <div className="flex-1" />
-          <LangSwitcher />
           <ThemeToggle />
         </div>
       </header>
 
-      {/* Single scroll region so the whole widget stays within one window
-          (works inside a fixed-height MoySklad iframe too) */}
-      <main className="flex-1 overflow-y-auto px-6 py-5 space-y-4 max-w-3xl mx-auto w-full">
+      <main className="flex-1 overflow-auto p-5">
+        <div className="max-w-6xl mx-auto space-y-4">
 
-        {/* ── Amount & currency ── */}
-        <section className="bg-surface/75 backdrop-blur-sm rounded-xl border border-line card-shadow p-5 space-y-3">
-          <h2 className="text-base font-semibold text-fg">{t(lang, 'pwAmountSection')}</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="sm:col-span-2">
-              <label className="text-xs font-semibold text-muted uppercase tracking-wide mb-1.5 block">{t(lang, 'pwTotalAmount')}</label>
-              <GroupedNumberInput
-                value={totalAmount}
-                onChange={setTotalAmount}
-                placeholder="30 000 000"
-                className={`${INPUT_CLS} font-mono text-lg`}
-              />
-            </div>
-            <div>
-              <label className="text-xs font-semibold text-muted uppercase tracking-wide mb-1.5 block">{t(lang, 'pwCurrency')}</label>
-              <select value={currencyIso} onChange={e => setCurrencyIso(e.target.value)} className={INPUT_CLS}>
-                {currencies.map(c => (
-                  <option key={c.isoCode} value={c.isoCode}>{c.isoCode} {c.isDefault ? '★' : ''}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {/* Exchange rate — pre-filled from the currency directory, editable by the client.
-              Shown only for a non-default (foreign) currency. */}
-          {selectedCurrency && !selectedCurrency.isDefault && (
-            <div>
-              <label className="text-xs font-semibold text-muted uppercase tracking-wide mb-1.5 block">{t(lang, 'pwRate')}</label>
-              <div className="flex items-center gap-2 text-sm text-fg">
-                <span className="text-muted whitespace-nowrap">1 {selectedCurrency.isoCode} =</span>
-                <div className="w-40">
-                  <GroupedNumberInput
-                    value={rateInput}
-                    onChange={n => { setRateInput(n); setRateEdited(true) }}
-                    className={`${INPUT_CLS} font-mono`}
-                  />
-                </div>
-                <span className="text-muted whitespace-nowrap">{baseIso}</span>
+          <div className="overflow-x-auto rounded-xl border border-line card-shadow bg-surface">
+            <div style={{ minWidth: 980 }}>
+              {/* Header */}
+              <div className="grid bg-surface-2 border-b border-line" style={{ gridTemplateColumns: COLS }}>
+                <HeadCell label="Дата" />
+                <HeadCell label="Фирма" />
+                <HeadCell label="Сумма" className="text-right" />
+                <HeadCell label="Курс" className="text-right" />
+                <HeadCell label="Сумма в $" className="text-right" />
+                <HeadCell label="Клиент" />
+                <div className="border-line" />
               </div>
-              <p className="text-xs text-faint mt-1">{t(lang, 'pwRateHint')}</p>
-            </div>
-          )}
 
-          {/* «От кого» — источник денег, до распределения (доп. поле документа) */}
-          <div>
-            <label className="text-xs font-semibold text-muted uppercase tracking-wide mb-1.5 block">{t(lang, 'pwFromWhom')}</label>
-            <input
-              type="text"
-              value={fromWhom}
-              onChange={e => setFromWhom(e.target.value)}
-              placeholder={t(lang, 'pwFromWhomPlaceholder')}
-              className={INPUT_CLS}
-            />
-            {fromWhom.trim() && fromWhomAttr === null && (
-              <p className="text-xs text-amber-600 mt-1">{t(lang, 'pwFromWhomMissing')}</p>
-            )}
-          </div>
-        </section>
-
-        {/* ── Counterparties ── (relative z-20 so the open suggestion dropdown
-             paints above the following card, whose backdrop-blur creates its own
-             stacking context) */}
-        <section className="relative z-20 bg-surface/75 backdrop-blur-sm rounded-xl border border-line card-shadow p-5 space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="text-base font-semibold text-fg">{t(lang, 'pwCounterpartiesSection')}</h2>
-            <div className="text-sm">
-              <span className="text-muted">{t(lang, 'pwDistributed')}: </span>
-              <span className="font-mono font-semibold text-fg">
-                {distributed.toLocaleString('ru-RU')} {currencyIso}
-              </span>
-            </div>
-          </div>
-
-          <div className="space-y-3">
-            {rows.map(row => {
-              const result = results[row.key]
-              return (
-                <div key={row.key} className="flex items-start gap-2">
-                  <div className="flex-1">
-                    <CounterpartyCombobox
+              {/* Rows */}
+              {rows.map(r => (
+                <div key={r.key} className="grid border-b border-line hover:bg-surface-2/40 transition-colors" style={{ gridTemplateColumns: COLS }}>
+                  <div className="border-r border-line">
+                    <input
+                      type="date"
+                      value={r.date}
+                      onChange={e => patchRow(r.key, { date: e.target.value })}
+                      className={`${CELL} font-mono`}
+                    />
+                  </div>
+                  <div className="border-r border-line">
+                    <SearchCell
+                      value={r.firm}
+                      onSelect={opt => patchRow(r.key, { firm: opt })}
+                      fetch={searchFirms}
                       token={token}
-                      selected={row.agent}
-                      onSelect={opt => patchRow(row.key, { agent: opt })}
-                      lang={lang}
+                      placeholder="Выберите фирму…"
                     />
                   </div>
-                  <div className="w-44">
+                  <div className="border-r border-line">
                     <GroupedNumberInput
-                      value={row.amount}
-                      onChange={n => patchRow(row.key, { amount: n })}
-                      placeholder="10 000 000"
-                      className={`${INPUT_CLS} font-mono`}
+                      value={r.amount}
+                      onChange={n => patchRow(r.key, { amount: n })}
+                      placeholder="0"
+                      className={`${CELL} font-mono text-right`}
                     />
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => removeRow(row.key)}
-                    disabled={rows.length === 1}
-                    title={t(lang, 'pwRemoveRow')}
-                    className="w-9 h-9 mt-0.5 rounded-lg flex items-center justify-center border border-line text-muted hover:border-red-500 hover:text-red-500 transition-all disabled:opacity-30 disabled:hover:border-line disabled:hover:text-muted shrink-0"
-                  >
-                    <Trash2 size={15} />
-                  </button>
-                  {result && (
-                    <div className="w-9 h-9 mt-0.5 flex items-center justify-center shrink-0" title={result.message}>
-                      {result.status === 'success'
-                        ? <CheckCircle2 size={18} className="text-green-600" />
-                        : <XCircle size={18} className="text-red-600" />}
-                    </div>
-                  )}
+                  <div className="border-r border-line">
+                    <GroupedNumberInput
+                      value={r.rate}
+                      onChange={n => patchRow(r.key, { rate: n })}
+                      placeholder="0"
+                      className={`${CELL} font-mono text-right`}
+                    />
+                  </div>
+                  <div className="border-r border-line bg-surface-2/40 flex items-center justify-end px-3">
+                    <span className="font-mono text-sm text-muted tabular-nums">{fmtUsd(usdOf(r))}</span>
+                  </div>
+                  <div className="border-r border-line">
+                    <SearchCell
+                      value={r.client}
+                      onSelect={opt => patchRow(r.key, { client: opt })}
+                      fetch={searchClients}
+                      token={token}
+                      placeholder="Выберите клиента…"
+                    />
+                  </div>
+                  <div className="flex items-center justify-center">
+                    <button
+                      type="button"
+                      onClick={() => removeRow(r.key)}
+                      disabled={rows.length === 1}
+                      title="Удалить строку"
+                      className="w-7 h-7 rounded-md flex items-center justify-center text-faint hover:text-red-500 hover:bg-red-500/10 transition-all disabled:opacity-30 disabled:hover:text-faint disabled:hover:bg-transparent"
+                    >
+                      <X size={15} />
+                    </button>
+                  </div>
                 </div>
-              )
-            })}
+              ))}
+
+              {/* Totals */}
+              <div className="grid bg-surface-2 font-semibold" style={{ gridTemplateColumns: COLS }}>
+                <div className="px-3 py-2.5 border-r border-line text-xs uppercase tracking-wide text-muted">Итого</div>
+                <div className="border-r border-line" />
+                <div className="px-3 py-2.5 border-r border-line text-right font-mono text-sm text-fg tabular-nums">{totalAmount.toLocaleString('ru-RU')}</div>
+                <div className="border-r border-line" />
+                <div className="px-3 py-2.5 border-r border-line text-right font-mono text-sm text-fg tabular-nums">{fmtUsd(totalUsd)}</div>
+                <div className="border-r border-line" />
+                <div />
+              </div>
+            </div>
           </div>
 
+          {/* Add row */}
           <button
             type="button"
             onClick={addRow}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-line text-xs text-muted hover:border-accent hover:text-accent transition-all"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-line text-sm text-muted hover:border-accent hover:text-accent transition-all"
           >
-            <Plus size={13} />
-            {t(lang, 'pwAddCounterparty')}
+            <Plus size={15} />
+            Добавить строку
           </button>
 
-          {remaining !== 0 && totalAmount > 0 && (
-            <p className={`text-xs ${remaining < 0 ? 'text-red-500' : 'text-muted'}`}>
-              {remaining < 0 ? t(lang, 'pwOverAllocated') : `${t(lang, 'pwRemaining')}: ${remaining.toLocaleString('ru-RU')} ${currencyIso}`}
+          <div className="pt-2 flex flex-col gap-2">
+            <button
+              type="button"
+              disabled
+              className="w-full sm:w-auto px-6 py-3 rounded-xl bg-accent text-white font-semibold text-sm disabled:opacity-40"
+            >
+              Создать документы
+            </button>
+            <p className="text-xs text-faint">
+              Демо-режим: данные пока не отправляются в МойСклад. Списки «Фирма» и «Клиент» заполнены тестовыми данными.
             </p>
-          )}
-
-          {/* Results with links */}
-          {Object.entries(results).some(([, r]) => r.link || r.message) && (
-            <div className="pt-2 border-t border-line space-y-1.5">
-              {rows.map(row => {
-                const r = results[row.key]
-                if (!r) return null
-                return (
-                  <div key={row.key} className="text-xs flex items-center gap-2">
-                    <span className={r.status === 'success' ? 'text-green-700' : 'text-red-600'}>
-                      {row.agent?.name ?? '—'}: {r.status === 'success' ? t(lang, 'pwRowSuccess') : `${t(lang, 'pwRowError')} — ${r.message}`}
-                    </span>
-                    {r.link && (
-                      <a href={r.link} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-accent hover:underline">
-                        <ExternalLink size={11} />
-                        {t(lang, 'pwViewDoc')}
-                      </a>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </section>
-
-        {/* ── Document type & legal entity ── */}
-        <section className="bg-surface/75 backdrop-blur-sm rounded-xl border border-line card-shadow p-5 space-y-3">
-          <h2 className="text-base font-semibold text-fg">{t(lang, 'pwDocSection')}</h2>
-
-          <div className="flex gap-3">
-            {(['cashin', 'paymentin'] as PaymentDocType[]).map(dt => (
-              <button
-                key={dt}
-                type="button"
-                onClick={() => setDocType(dt)}
-                className={`flex-1 px-4 py-3 rounded-lg border text-sm font-medium transition-all ${
-                  docType === dt ? 'border-accent bg-accent/10 text-accent' : 'border-line text-muted hover:border-accent/50'
-                }`}
-              >
-                {t(lang, dt === 'cashin' ? 'pwCashIn' : 'pwPaymentIn')}
-              </button>
-            ))}
           </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="text-xs font-semibold text-muted uppercase tracking-wide mb-1.5 block">{t(lang, 'pwOrganization')}</label>
-              {organizations === null ? (
-                <Skeleton className="h-9 w-full" />
-              ) : organizations.length === 0 ? (
-                <p className="text-xs text-faint py-2">{t(lang, 'pwNoOrganizations')}</p>
-              ) : (
-                <select value={orgId} onChange={e => setOrgId(e.target.value)} className={INPUT_CLS}>
-                  {organizations.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
-                </select>
-              )}
-            </div>
-            <div>
-              <label className="text-xs font-semibold text-muted uppercase tracking-wide mb-1.5 block">{t(lang, 'pwPaymentPurpose')}</label>
-              <input
-                type="text"
-                value={paymentPurpose}
-                onChange={e => setPaymentPurpose(e.target.value)}
-                placeholder={t(lang, 'pwPaymentPurposePlaceholder')}
-                className={INPUT_CLS}
-              />
-            </div>
-          </div>
-        </section>
-
-        {submitError && (
-          <p className="text-sm text-red-600 text-center">{submitError}</p>
-        )}
-
-        <button
-          type="button"
-          onClick={handleSubmit}
-          disabled={!canSubmit}
-          className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-accent text-white font-semibold text-sm hover:bg-accent-strong transition-all disabled:opacity-40"
-        >
-          {submitting && <Loader2 size={16} className="animate-spin" />}
-          {submitting ? t(lang, 'pwSubmitting') : t(lang, 'pwSubmit')}
-        </button>
+        </div>
       </main>
     </div>
   )

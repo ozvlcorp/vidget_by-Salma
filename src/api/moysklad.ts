@@ -112,6 +112,57 @@ export async function getOrganizations(token: string): Promise<OrganizationOptio
   return data.rows.filter(o => !o.archived).map(o => ({ id: o.id, name: o.name }))
 }
 
+// ─── Dummy data for the tabular UI ───────────────────────────────────────────
+// TODO: replace searchFirms / searchClients with real MoySklad lookups once the
+// field mapping is confirmed. The names below are sample data from the client's
+// spreadsheet so the dropdowns are testable without a token.
+
+export interface NamedOption { id: string; name: string }
+
+const DUMMY_FIRMS: string[] = [
+  'МЧЖ «Зенит Технолоджи»',
+  'МЧЖ «Гала Осиё Инвест»',
+  'МЧЖ «Оптовик Премиум»',
+  'МЧЖ «Норм Энгил»',
+  'МЧЖ «Старко №1»',
+  'МЧЖ «Хавас Фуд»',
+  'МЧЖ «Лаган»',
+  'МЧЖ «Донзар»',
+  'МЧЖ «Ёш Улгуржи Талбиркор»',
+  'МЧЖ «Фудланд»',
+  'МЧЖ «Фреш Маркет Ангрен»',
+  'МЧЖ «Продукт Дистрибьюшн»',
+  'МЧЖ «Дарвоза Савдо»',
+  'МЧЖ «Хакимова Пахриддин»',
+  'МЧЖ «Мастонабону Ишончи»',
+  'МЧЖ «Томди Блесс»',
+  'МЧЖ «Сафия»',
+]
+
+const DUMMY_CLIENTS: string[] = [
+  'Узум', 'Азиз тош', 'Жам сам', 'Анвар сам', 'Хавас', 'Абдувохид',
+  'Жўрабек анг', 'Дилмурод чир', 'Жахон қўй', 'Элмурод зар', 'Махмуд чир',
+  'Усмон бек', 'Макро', 'Сафия', 'Азиз ота',
+]
+
+const toOptions = (names: string[]): NamedOption[] => names.map((name, i) => ({ id: String(i + 1), name }))
+
+function filterOptions(all: NamedOption[], query: string): NamedOption[] {
+  const s = query.trim().toLowerCase()
+  const list = s ? all.filter(o => o.name.toLowerCase().includes(s)) : all
+  return list.slice(0, 50)
+}
+
+/** Dummy "Фирма" (paying company) search. Swap for a real MoySklad lookup later. */
+export async function searchFirms(_token: string, query: string): Promise<NamedOption[]> {
+  return new Promise(res => setTimeout(() => res(filterOptions(toOptions(DUMMY_FIRMS), query)), 120))
+}
+
+/** Dummy "Клиент" search. Swap for a real MoySklad lookup later. */
+export async function searchClients(_token: string, query: string): Promise<NamedOption[]> {
+  return new Promise(res => setTimeout(() => res(filterOptions(toOptions(DUMMY_CLIENTS), query)), 120))
+}
+
 export interface CounterpartyOption { id: string; name: string }
 
 /**
