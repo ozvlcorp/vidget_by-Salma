@@ -16,16 +16,16 @@ const CURRENCIES: Array<{ value: Cur; label: string }> = [
   { value: 'USD', label: 'доллар' },
 ]
 
-// Position row: товар, ед.изм (шт/упаковка), объём, количество, цена, (сумма)
+// Position row: товар, ед.изм (шт/упаковка), количество, объём(л), цена за литр($), (сумма)
 interface Pos {
   key: string
   product: ProductOption | null
-  packId: string  // '' = базовая единица (шт); иначе id упаковки товара
+  packId: string       // '' = базовая единица (шт); иначе id упаковки товара
   quantity: number
-  price: number   // за базовую единицу, в major-единицах (сум)
+  pricePerLiter: number // «Цена за литр (доллар)» — из доп. поля товара, редактируемая
 }
 
-// gutter · товар · ед.изм · объём · количество · цена · сумма · удалить
+// gutter · товар · ед.изм · количество · объём · цена за литр · сумма · удалить
 const COLS = '44px 1.3fr 120px 96px 116px 140px 150px 40px'
 
 const FIELD = 'h-8 px-2 rounded-md border border-line bg-surface text-fg text-xs'
@@ -41,8 +41,9 @@ export default function CustomerOrderPage() {
   const [agent, setAgent] = useState<NamedOption | null>(null)
   const [date, setDate] = useState(todayStr())
 
-  // Currency (like the payments section): сум → order in UZS with a rate; доллар → base USD
-  const [currency, setCurrency] = useState<Cur>('UZS')
+  // Currency: доллар (base USD) by default, since the price is per litre in dollars;
+  // сум → order in UZS with a rate.
+  const [currency, setCurrency] = useState<Cur>('USD')
   const [rate, setRate] = useState(0)
   const [uzsCurrency, setUzsCurrency] = useState<CurrencyRate | null>(null)
 
@@ -53,7 +54,7 @@ export default function CustomerOrderPage() {
   // Units of measure id → name (to label шт / коробка)
   const [uomName, setUomName] = useState<Record<string, string>>({})
 
-  const [rows, setRows] = useState<Pos[]>([{ key: 'p-0', product: null, packId: '', quantity: 1, price: 0 }])
+  const [rows, setRows] = useState<Pos[]>([{ key: 'p-0', product: null, packId: '', quantity: 1, pricePerLiter: 0 }])
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [okMsg, setOkMsg] = useState<string | null>(null)
@@ -77,7 +78,7 @@ export default function CustomerOrderPage() {
   }, [token])
 
   function freshRow(): Pos {
-    return { key: `p-${nextKey.current++}`, product: null, packId: '', quantity: 1, price: 0 }
+    return { key: `p-${nextKey.current++}`, product: null, packId: '', quantity: 1, pricePerLiter: 0 }
   }
   function addRow() { setOkMsg(null); setRows(rs => [...rs, freshRow()]) }
   function removeRow(key: string) { setRows(rs => (rs.length > 1 ? rs.filter(r => r.key !== key) : rs)) }
@@ -85,24 +86,26 @@ export default function CustomerOrderPage() {
     setOkMsg(null)
     setRows(rs => rs.map(r => (r.key === key ? { ...r, ...patch } : r)))
   }
-  // Picking a product auto-fills its sale price and resets the unit to base (шт).
+  // Picking a product fills the price-per-litre from its card and defaults the unit
+  // to the first pack (коробка) when the product has one.
   function pickProduct(key: string, p: ProductOption | null) {
-    patchRow(key, { product: p, price: p ? p.salePrice / 100 : 0, packId: '' })
+    patchRow(key, { product: p, pricePerLiter: p?.pricePerLiter ?? 0, packId: p?.packs[0]?.id ?? '' })
   }
 
   // Base units per selected unit: pack quantity when a pack is chosen, else 1.
   const packOf = (r: Pos) => r.product?.packs.find(p => p.id === r.packId) ?? null
   const factorOf = (r: Pos) => packOf(r)?.quantity ?? 1
   const baseQtyOf = (r: Pos) => r.quantity * factorOf(r)     // всего базовых единиц (шт)
-  const sumOf = (r: Pos) => r.price * baseQtyOf(r)
   // Литраж позиции: объём из карточки (за 1 шт) × количество в базовых единицах
   const litersOf = (r: Pos) => (r.product?.volume ?? 0) * baseQtyOf(r)
+  // Сумма позиции = литраж × цена за литр (в долларах), затем в валюту заказа
+  const amountUsdOf = (r: Pos) => litersOf(r) * r.pricePerLiter
+  const sumOf = (r: Pos) => (currency === 'UZS' ? amountUsdOf(r) * rate : amountUsdOf(r))
   const total = rows.reduce((s, r) => s + sumOf(r), 0)
+  const totalUsd = rows.reduce((s, r) => s + amountUsdOf(r), 0)
   const totalLiters = rows.reduce((s, r) => s + litersOf(r), 0)
   // Base unit label (e.g. шт) for a row's product
   const baseUnitLabel = (r: Pos) => (r.product?.uomId && uomName[r.product.uomId]) || 'шт'
-  // USD equivalent of the total: доллар → as-is; сум → total / Курс
-  const totalUsd = currency === 'USD' ? total : (rate > 0 ? total / rate : 0)
   const validRows = rows.filter(r => r.product && r.quantity > 0)
   const needsRate = currency === 'UZS'
   const canSubmit = !submitting && !!orgId && !!agent && validRows.length > 0
@@ -124,11 +127,14 @@ export default function CustomerOrderPage() {
         stateMeta: state?.meta,
         positions: validRows.map(r => {
           const pack = packOf(r)
+          // Цена за базовую единицу (шт) = объём(л за шт) × цена за литр, в валюте заказа
+          const priceUsdPerUnit = (r.product!.volume ?? 0) * r.pricePerLiter
+          const priceMajor = currency === 'UZS' ? priceUsdPerUnit * rate : priceUsdPerUnit
           return {
             assortmentId: r.product!.id,
             assortmentType: r.product!.type,
             quantity: r.quantity,   // в упаковках, если выбрана упаковка; иначе в базовых единицах
-            priceMajor: r.price,    // за базовую единицу
+            priceMajor,
             pack: pack
               ? { id: pack.id, quantity: pack.quantity, ...(pack.uomMeta ? { uom: { meta: pack.uomMeta } } : {}) }
               : undefined,
@@ -217,9 +223,9 @@ export default function CustomerOrderPage() {
             <div className={GUTTER} />
             <HeadCell label="Товар" />
             <HeadCell label="Ед. изм." />
-            <HeadCell label="Объём, л" className="text-right" />
             <HeadCell label="Количество" className="text-right" />
-            <HeadCell label="Цена" className="text-right" />
+            <HeadCell label="Объём, л" className="text-right" />
+            <HeadCell label="Цена за литр, $" className="text-right" />
             <HeadCell label="Сумма" className="text-right" />
             <div className="border-line" />
           </div>
@@ -244,16 +250,16 @@ export default function CustomerOrderPage() {
                   ))}
                 </select>
               </div>
+              <div className={CELLBOX}>
+                <GroupedNumberInput value={r.quantity} onChange={n => patchRow(r.key, { quantity: n })} placeholder="0" className={`${CELL} font-mono text-right`} />
+              </div>
               <div className="border-r border-line bg-surface-2/40 flex items-center justify-end px-2.5">
                 <span className="font-mono text-sm text-muted tabular-nums" title={r.product ? `${fmtMoney(r.product.volume)} л за шт` : undefined}>
                   {r.product ? `${fmtMoney(litersOf(r))} л` : '—'}
                 </span>
               </div>
               <div className={CELLBOX}>
-                <GroupedNumberInput value={r.quantity} onChange={n => patchRow(r.key, { quantity: n })} placeholder="0" className={`${CELL} font-mono text-right`} />
-              </div>
-              <div className={CELLBOX}>
-                <GroupedNumberInput value={r.price} onChange={n => patchRow(r.key, { price: n })} placeholder="0" className={`${CELL} font-mono text-right`} />
+                <GroupedNumberInput value={r.pricePerLiter} onChange={n => patchRow(r.key, { pricePerLiter: n })} placeholder="0" className={`${CELL} font-mono text-right`} />
               </div>
               <div className="border-r border-line bg-surface-2/40 flex items-center justify-end px-2.5">
                 <span className="font-mono text-sm text-muted tabular-nums">{fmtMoney(sumOf(r))}</span>
@@ -301,8 +307,8 @@ export default function CustomerOrderPage() {
             <div className={GUTTER} />
             <div className="px-2.5 py-2.5 border-r border-line text-xs uppercase tracking-wide text-muted">Итого</div>
             <div className="border-r border-line" />
-            <div className="px-2.5 py-2.5 border-r border-line text-right font-mono text-sm text-fg tabular-nums">{fmtMoney(totalLiters)} л</div>
             <div className="border-r border-line" />
+            <div className="px-2.5 py-2.5 border-r border-line text-right font-mono text-sm text-fg tabular-nums">{fmtMoney(totalLiters)} л</div>
             <div className="border-r border-line" />
             <div className="px-2.5 py-2.5 border-r border-line text-right font-mono text-sm text-fg tabular-nums">{fmtMoney(total)}</div>
             <div />

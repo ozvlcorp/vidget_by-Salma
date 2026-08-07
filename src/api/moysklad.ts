@@ -163,20 +163,21 @@ export interface ProductPack {
   uomMeta: Record<string, unknown> | null
 }
 
-/** A product/variant/service from the assortment, with sale price, volume and packs. */
+/** A product/variant/service from the assortment, with price-per-liter, volume and packs. */
 export interface ProductOption {
   id: string
   name: string
   type: string
   salePrice: number                     // minor units, per base uom
-  volume: number                        // объём из карточки товара
+  pricePerLiter: number                 // «Цена за литр (доллар)» — доп. поле, в долларах
+  volume: number                        // объём из карточки товара (per base unit)
   uomId: string | null                  // base unit of measure
   packs: ProductPack[]
 }
 
 /**
  * Assortment search for order positions. Returns products/variants/services with
- * their default sale price (kopecks), volume, base uom and packaging options.
+ * their volume, base uom, packaging, and the "Цена за литр (доллар)" custom field.
  */
 export async function searchProducts(token: string, query: string): Promise<ProductOption[]> {
   const q = query.trim()
@@ -189,14 +190,23 @@ export async function searchProducts(token: string, query: string): Promise<Prod
     volume?: number
     uom?: { meta?: { href?: string } }
     packs?: Array<{ id: string; quantity?: number; uom?: { meta?: { href?: string } & Record<string, unknown> } }>
+    attributes?: Array<{ name?: string; value?: unknown }>
   }
   const data = await get<{ rows: Row[] }>('/entity/assortment', params, token)
     .catch(() => ({ rows: [] as Row[] }))
+  const readPricePerLiter = (attrs?: Array<{ name?: string; value?: unknown }>): number => {
+    const a = attrs?.find(x => /цена\s*за\s*литр/i.test(x.name ?? ''))
+    // custom field value can be a plain number or an object { value } depending on type
+    const raw = a?.value
+    const v = typeof raw === 'object' && raw !== null ? Number((raw as { value?: unknown }).value) : Number(raw)
+    return isFinite(v) ? v : 0
+  }
   return (data.rows ?? []).map(r => ({
     id: r.id,
     name: r.name,
     type: r.meta?.type ?? 'product',
     salePrice: r.salePrices?.[0]?.value ?? 0,
+    pricePerLiter: readPricePerLiter(r.attributes),
     volume: r.volume ?? 0,
     uomId: idFromHref(r.uom?.meta?.href),
     packs: (r.packs ?? []).map(p => ({
