@@ -6,6 +6,8 @@ export type Theme = 'light' | 'dark'
 
 export interface AppContextValue {
   token: string
+  userName: string          // отображаемое имя вошедшего сотрудника
+  logout: () => void
   lang: Lang
   setLang: (l: Lang) => void
   currencies: CurrencyRate[]

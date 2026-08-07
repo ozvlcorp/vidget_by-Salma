@@ -1,17 +1,16 @@
 import { useState, useEffect } from 'react'
-import { Sun, Moon } from 'lucide-react'
+import { Sun, Moon, LogOut } from 'lucide-react'
 import { AppContext, useAppContext } from './context/AppContext'
 import type { Theme } from './context/AppContext'
 import type { CurrencyRate } from './api/moysklad'
 import { parseLang } from './i18n'
 import type { Lang } from './i18n'
-import { t } from './i18n'
 import PaymentWidgetPage from './pages/PaymentWidgetPage'
 import CustomerOrderPage from './pages/CustomerOrderPage'
+import LoginScreen from './components/LoginScreen'
 
-const BACKEND_URL = 'https://widget-backend.oymoysklad.com'
-// TODO: set this to whatever name this widget is registered under on the backend above.
-const WIDGET_NAME = 'payment-widget'
+const TOKEN_KEY = 'oy-ms-token'
+const USER_KEY = 'oy-ms-user'
 
 function getUrlParam(key: string): string | null {
   const url = new URL(window.location.href)
@@ -26,53 +25,53 @@ function getInitialTheme(): Theme {
   return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
 }
 
-function LoadingScreen() {
-  return (
-    <div className="fabric-bg min-h-screen flex items-center justify-center">
-      <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
-    </div>
-  )
-}
-
-function NoTokenScreen({ lang }: { lang: Lang }) {
-  return (
-    <div className="fabric-bg min-h-screen flex items-center justify-center p-6">
-      <div className="bg-surface/70 backdrop-blur-sm rounded-2xl border border-line p-8 max-w-sm text-center space-y-3">
-        <p className="text-sm font-semibold text-fg">{t(lang, 'tokenMissing')}</p>
-      </div>
-    </div>
-  )
-}
-
 function App() {
   const rawLang = getUrlParam('lang')
 
-  // Dev/testing: token in URL param — resolved synchronously so there's no
-  // loading flash, and no state clash with the async backend-fetch path below.
-  const [token, setToken] = useState<string | null>(() => getUrlParam('token'))
-  const [tokenLoading, setTokenLoading] = useState<boolean>(() => !getUrlParam('token'))
+  // Token comes from a URL param (dev/testing) or a per-tab session left by login.
+  const [token, setToken] = useState<string | null>(() => {
+    const urlToken = getUrlParam('token')
+    if (urlToken) return urlToken
+    try { return sessionStorage.getItem(TOKEN_KEY) } catch { return null }
+  })
+  const [userName, setUserName] = useState<string>(() => {
+    try { return sessionStorage.getItem(USER_KEY) ?? '' } catch { return '' }
+  })
   const [lang, setLang] = useState<Lang>(parseLang(rawLang))
   const [currencies, setCurrencies] = useState<CurrencyRate[]>([])
   const [theme, setThemeState] = useState<Theme>(getInitialTheme)
 
+  function handleLogin(tok: string, name: string) {
+    try {
+      sessionStorage.setItem(TOKEN_KEY, tok)
+      sessionStorage.setItem(USER_KEY, name)
+    } catch { /* ignore */ }
+    setUserName(name)
+    setToken(tok)
+  }
+
+  function logout() {
+    try {
+      sessionStorage.removeItem(TOKEN_KEY)
+      sessionStorage.removeItem(USER_KEY)
+    } catch { /* ignore */ }
+    setUserName('')
+    setToken(null)
+  }
+
+  // A 401 from any request means the token was revoked / the session expired —
+  // drop back to the login screen.
   useEffect(() => {
-    if (getUrlParam('token')) return // already resolved synchronously above
-    // Production: MoySklad adds ?contextKey=X and ?accountId=X to iframe URL
-    const contextKey = getUrlParam('contextKey')
-    const accountId  = getUrlParam('accountId')
-    const account    = getUrlParam('account')
-    const qs = new URLSearchParams()
-    if (contextKey) qs.set('contextKey', contextKey)
-    if (accountId)  qs.set('accountId', accountId)
-    if (account)    qs.set('account', account)
-    const params = qs.toString() ? `?${qs.toString()}` : ''
-    fetch(`${BACKEND_URL}/${WIDGET_NAME}/token${params}`)
-      .then(r => r.json())
-      .then((d: { access_token?: string }) => {
-        if (d.access_token) setToken(d.access_token)
-      })
-      .catch(() => {})
-      .finally(() => setTokenLoading(false))
+    const onExpired = () => {
+      try {
+        sessionStorage.removeItem(TOKEN_KEY)
+        sessionStorage.removeItem(USER_KEY)
+      } catch { /* ignore */ }
+      setUserName('')
+      setToken(null)
+    }
+    window.addEventListener('ms:session-expired', onExpired)
+    return () => window.removeEventListener('ms:session-expired', onExpired)
   }, [])
 
   useEffect(() => {
@@ -84,11 +83,10 @@ function App() {
     try { localStorage.setItem('oy-theme', t) } catch { /* ignore */ }
   }
 
-  if (tokenLoading) return <LoadingScreen />
-  if (!token) return <NoTokenScreen lang={lang} />
+  if (!token) return <LoginScreen onLogin={handleLogin} />
 
   return (
-    <AppContext.Provider value={{ token, lang, setLang, currencies, setCurrencies, theme, setTheme }}>
+    <AppContext.Provider value={{ token, userName, logout, lang, setLang, currencies, setCurrencies, theme, setTheme }}>
       <Shell />
     </AppContext.Provider>
   )
@@ -102,7 +100,7 @@ const SECTIONS: Array<{ id: Section; label: string }> = [
 ]
 
 function Shell() {
-  const { theme, setTheme } = useAppContext()
+  const { theme, setTheme, userName, logout } = useAppContext()
   const [section, setSection] = useState<Section>('payment')
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-base">
@@ -123,6 +121,7 @@ function Shell() {
           </button>
         ))}
         <div className="flex-1" />
+        {userName && <span className="mb-2 hidden sm:inline text-xs text-muted max-w-[200px] truncate" title={userName}>{userName}</span>}
         <button
           type="button"
           onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
@@ -131,6 +130,15 @@ function Shell() {
           className="mb-0.5 w-8 h-8 flex items-center justify-center rounded-md text-muted hover:text-fg hover:bg-surface-3 transition-colors"
         >
           {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+        </button>
+        <button
+          type="button"
+          onClick={logout}
+          title="Выйти"
+          aria-label="Выйти"
+          className="mb-0.5 w-8 h-8 flex items-center justify-center rounded-md text-muted hover:text-red-500 hover:bg-red-500/10 transition-colors"
+        >
+          <LogOut size={16} />
         </button>
       </nav>
       <div className="flex-1 overflow-hidden">

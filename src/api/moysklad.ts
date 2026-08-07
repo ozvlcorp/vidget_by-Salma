@@ -59,6 +59,53 @@ async function get<T>(path: string, params: Record<string, string>, token: strin
   return r.json()
 }
 
+// ─── Auth ───────────────────────────────────────────────────────────────────────
+
+// UTF-8 → base64 (btoa alone breaks on non-Latin1 chars in a password).
+function b64(s: string): string {
+  const bytes = new TextEncoder().encode(s)
+  let bin = ''
+  for (const byte of bytes) bin += String.fromCharCode(byte)
+  return btoa(bin)
+}
+
+/**
+ * Exchanges a MoySklad login + password for a personal access token
+ * (POST /security/token, HTTP Basic auth). The token then authorises every
+ * request as that employee. We never store the password — only the token.
+ */
+export async function login(username: string, password: string): Promise<string> {
+  let r: Response
+  try {
+    r = await fetch(`${BASE}/security/token`, {
+      method: 'POST',
+      headers: { Authorization: `Basic ${b64(`${username}:${password}`)}`, Accept: 'application/json' },
+    })
+  } catch {
+    throw new Error('Нет связи с сервером. Проверьте интернет и попробуйте снова.')
+  }
+  if (r.status === 401) throw new Error('Неверный логин или пароль')
+  if (!r.ok) {
+    const text = await r.text().catch(() => '')
+    let msg = `Ошибка входа (HTTP ${r.status})`
+    try {
+      const p = JSON.parse(text) as { errors?: Array<{ error?: string }> }
+      if (p?.errors?.[0]?.error) msg = p.errors[0].error!
+    } catch { /* not JSON */ }
+    throw new Error(msg)
+  }
+  const data = await r.json() as { access_token?: string }
+  if (!data.access_token) throw new Error('Сервер не вернул токен')
+  return data.access_token
+}
+
+/** Display name of the currently authenticated employee ('' if unavailable). */
+export async function getMyName(token: string): Promise<string> {
+  const data = await get<{ name?: string; fullName?: string }>('/context/employee', {}, token)
+    .catch(() => ({} as { name?: string; fullName?: string }))
+  return data.name || data.fullName || ''
+}
+
 // ─── Currencies ───────────────────────────────────────────────────────────────
 
 export interface CurrencyRate {
