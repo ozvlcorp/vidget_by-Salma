@@ -145,28 +145,66 @@ export async function getStores(token: string): Promise<StoreOption[]> {
   return data.rows.filter(s => !s.archived).map(s => ({ id: s.id, name: s.name }))
 }
 
-/** A product/variant/service from the assortment, with its sale price (in minor units). */
-export interface ProductOption { id: string; name: string; type: string; salePrice: number }
+/** Units of measure (единицы измерения) — id → name, to label шт / коробка etc. */
+export async function getUoms(token: string): Promise<NamedOption[]> {
+  const data = await get<{ rows: Array<{ id: string; name: string }> }>(
+    '/entity/uom', { limit: '1000' }, token
+  ).catch(() => ({ rows: [] as Array<{ id: string; name: string }> }))
+  return (data.rows ?? []).map(u => ({ id: u.id, name: u.name }))
+}
+
+const idFromHref = (href?: string): string | null => href ? (href.split('/').pop() ?? null) : null
+
+/** A packaging (упаковка) of a product: how many base units it holds, and its own uom. */
+export interface ProductPack {
+  id: string
+  quantity: number                      // base units per pack
+  uomId: string | null
+  uomMeta: Record<string, unknown> | null
+}
+
+/** A product/variant/service from the assortment, with sale price, volume and packs. */
+export interface ProductOption {
+  id: string
+  name: string
+  type: string
+  salePrice: number                     // minor units, per base uom
+  volume: number                        // объём из карточки товара
+  uomId: string | null                  // base unit of measure
+  packs: ProductPack[]
+}
 
 /**
  * Assortment search for order positions. Returns products/variants/services with
- * their default sale price (kopecks). `type` is needed to reference the right entity.
+ * their default sale price (kopecks), volume, base uom and packaging options.
  */
 export async function searchProducts(token: string, query: string): Promise<ProductOption[]> {
   const q = query.trim()
   const params: Record<string, string> = q
     ? { search: q, limit: '20' }
     : { limit: '20' }
-  const data = await get<{ rows: Array<{
+  type Row = {
     id: string; name: string; meta: { type: string }
     salePrices?: Array<{ value: number }>
-  }> }>('/entity/assortment', params, token)
-    .catch(() => ({ rows: [] as Array<{ id: string; name: string; meta: { type: string }; salePrices?: Array<{ value: number }> }> }))
+    volume?: number
+    uom?: { meta?: { href?: string } }
+    packs?: Array<{ id: string; quantity?: number; uom?: { meta?: { href?: string } & Record<string, unknown> } }>
+  }
+  const data = await get<{ rows: Row[] }>('/entity/assortment', params, token)
+    .catch(() => ({ rows: [] as Row[] }))
   return (data.rows ?? []).map(r => ({
     id: r.id,
     name: r.name,
     type: r.meta?.type ?? 'product',
     salePrice: r.salePrices?.[0]?.value ?? 0,
+    volume: r.volume ?? 0,
+    uomId: idFromHref(r.uom?.meta?.href),
+    packs: (r.packs ?? []).map(p => ({
+      id: p.id,
+      quantity: p.quantity ?? 1,
+      uomId: idFromHref(p.uom?.meta?.href),
+      uomMeta: p.uom?.meta ?? null,
+    })),
   }))
 }
 
@@ -184,8 +222,9 @@ export async function getOrderStates(token: string): Promise<OrderState[]> {
 export interface OrderPositionInput {
   assortmentId: string
   assortmentType: string   // 'product' | 'variant' | 'service' | ...
-  quantity: number
-  priceMajor: number       // price per unit in major units (сум)
+  quantity: number         // in packs when `pack` is set, otherwise in base units
+  priceMajor: number       // price per base unit, in major units (сум)
+  pack?: Record<string, unknown>  // упаковка: { id, quantity, uom } — omit for base unit
 }
 
 export interface CreateOrderParams {
@@ -204,11 +243,15 @@ export async function createCustomerOrder(token: string, p: CreateOrderParams): 
   const body: Record<string, unknown> = {
     organization: msRef('organization', p.organizationId),
     agent: msRef('counterparty', p.agentId),
-    positions: p.positions.map(pos => ({
-      quantity: pos.quantity,
-      price: Math.round(pos.priceMajor * 100),
-      assortment: msRef(pos.assortmentType, pos.assortmentId),
-    })),
+    positions: p.positions.map(pos => {
+      const position: Record<string, unknown> = {
+        quantity: pos.quantity,
+        price: Math.round(pos.priceMajor * 100),
+        assortment: msRef(pos.assortmentType, pos.assortmentId),
+      }
+      if (pos.pack) position.pack = pos.pack
+      return position
+    }),
   }
   if (p.storeId) body.store = msRef('store', p.storeId)
   if (p.moment) body.moment = p.moment

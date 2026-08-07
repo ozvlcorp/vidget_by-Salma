@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { Plus, X, Loader2 } from 'lucide-react'
 import {
   getOrganizations, getStores, searchCounterparties, searchProducts, createCustomerOrder,
-  getCurrencies, getOrderStates,
+  getCurrencies, getOrderStates, getUoms,
   type NamedOption, type OrganizationOption, type StoreOption, type ProductOption,
   type CurrencyRate, type OrderState,
 } from '../api/moysklad'
@@ -16,16 +16,17 @@ const CURRENCIES: Array<{ value: Cur; label: string }> = [
   { value: 'USD', label: 'доллар' },
 ]
 
-// Position row: товар, количество, цена, (сумма = кол-во × цена)
+// Position row: товар, ед.изм (шт/упаковка), объём, количество, цена, (сумма)
 interface Pos {
   key: string
   product: ProductOption | null
+  packId: string  // '' = базовая единица (шт); иначе id упаковки товара
   quantity: number
-  price: number   // за единицу, в major-единицах (сум)
+  price: number   // за базовую единицу, в major-единицах (сум)
 }
 
-// gutter · товар · количество · цена · сумма · удалить
-const COLS = '44px 1.4fr 130px 150px 170px 40px'
+// gutter · товар · ед.изм · объём · количество · цена · сумма · удалить
+const COLS = '44px 1.3fr 120px 96px 116px 140px 150px 40px'
 
 const FIELD = 'h-8 px-2 rounded-md border border-line bg-surface text-fg text-xs'
 
@@ -49,7 +50,10 @@ export default function CustomerOrderPage() {
   const [states, setStates] = useState<OrderState[]>([])
   const [stateId, setStateId] = useState('')
 
-  const [rows, setRows] = useState<Pos[]>([{ key: 'p-0', product: null, quantity: 1, price: 0 }])
+  // Units of measure id → name (to label шт / коробка)
+  const [uomName, setUomName] = useState<Record<string, string>>({})
+
+  const [rows, setRows] = useState<Pos[]>([{ key: 'p-0', product: null, packId: '', quantity: 1, price: 0 }])
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [okMsg, setOkMsg] = useState<string | null>(null)
@@ -67,10 +71,13 @@ export default function CustomerOrderPage() {
     getOrderStates(token)
       .then(setStates)
       .catch(() => setStates([]))
+    getUoms(token)
+      .then(us => setUomName(Object.fromEntries(us.map(u => [u.id, u.name]))))
+      .catch(() => setUomName({}))
   }, [token])
 
   function freshRow(): Pos {
-    return { key: `p-${nextKey.current++}`, product: null, quantity: 1, price: 0 }
+    return { key: `p-${nextKey.current++}`, product: null, packId: '', quantity: 1, price: 0 }
   }
   function addRow() { setOkMsg(null); setRows(rs => [...rs, freshRow()]) }
   function removeRow(key: string) { setRows(rs => (rs.length > 1 ? rs.filter(r => r.key !== key) : rs)) }
@@ -78,13 +85,18 @@ export default function CustomerOrderPage() {
     setOkMsg(null)
     setRows(rs => rs.map(r => (r.key === key ? { ...r, ...patch } : r)))
   }
-  // Picking a product auto-fills its sale price.
+  // Picking a product auto-fills its sale price and resets the unit to base (шт).
   function pickProduct(key: string, p: ProductOption | null) {
-    patchRow(key, { product: p, price: p ? p.salePrice / 100 : 0 })
+    patchRow(key, { product: p, price: p ? p.salePrice / 100 : 0, packId: '' })
   }
 
-  const sumOf = (r: Pos) => r.quantity * r.price
+  // Base units per selected unit: pack quantity when a pack is chosen, else 1.
+  const packOf = (r: Pos) => r.product?.packs.find(p => p.id === r.packId) ?? null
+  const factorOf = (r: Pos) => packOf(r)?.quantity ?? 1
+  const sumOf = (r: Pos) => r.quantity * r.price * factorOf(r)
   const total = rows.reduce((s, r) => s + sumOf(r), 0)
+  // Base unit label (e.g. шт) for a row's product
+  const baseUnitLabel = (r: Pos) => (r.product?.uomId && uomName[r.product.uomId]) || 'шт'
   // USD equivalent of the total: доллар → as-is; сум → total / Курс
   const totalUsd = currency === 'USD' ? total : (rate > 0 ? total / rate : 0)
   const validRows = rows.filter(r => r.product && r.quantity > 0)
@@ -106,12 +118,18 @@ export default function CustomerOrderPage() {
         currencyId: currency === 'UZS' ? uzsCurrency?.id : undefined,
         rateValue: currency === 'UZS' ? 1 / rate : undefined,
         stateMeta: state?.meta,
-        positions: validRows.map(r => ({
-          assortmentId: r.product!.id,
-          assortmentType: r.product!.type,
-          quantity: r.quantity,
-          priceMajor: r.price,
-        })),
+        positions: validRows.map(r => {
+          const pack = packOf(r)
+          return {
+            assortmentId: r.product!.id,
+            assortmentType: r.product!.type,
+            quantity: r.quantity,   // в упаковках, если выбрана упаковка; иначе в базовых единицах
+            priceMajor: r.price,    // за базовую единицу
+            pack: pack
+              ? { id: pack.id, quantity: pack.quantity, ...(pack.uomMeta ? { uom: { meta: pack.uomMeta } } : {}) }
+              : undefined,
+          }
+        }),
       })
       setOkMsg(`Заказ создан${doc.name ? ` № ${doc.name}` : ''}`)
       // Reset to an empty order
@@ -194,6 +212,8 @@ export default function CustomerOrderPage() {
           <div className="grid sticky top-0 z-20 bg-surface-2 border-b border-line shadow-sm" style={{ gridTemplateColumns: COLS }}>
             <div className={GUTTER} />
             <HeadCell label="Товар" />
+            <HeadCell label="Ед. изм." />
+            <HeadCell label="Объём" className="text-right" />
             <HeadCell label="Количество" className="text-right" />
             <HeadCell label="Цена" className="text-right" />
             <HeadCell label="Сумма" className="text-right" />
@@ -206,6 +226,22 @@ export default function CustomerOrderPage() {
               <div className={GUTTER}>{i + 1}</div>
               <div className={CELLBOX}>
                 <SearchCell value={r.product} onSelect={p => pickProduct(r.key, p)} fetch={searchProducts} token={token} placeholder="Выберите товар…" />
+              </div>
+              <div className={CELLBOX}>
+                <select
+                  value={r.packId}
+                  onChange={e => patchRow(r.key, { packId: e.target.value })}
+                  disabled={!r.product}
+                  className={`${CELL} cursor-pointer disabled:cursor-not-allowed`}
+                >
+                  <option value="">{baseUnitLabel(r)}</option>
+                  {(r.product?.packs ?? []).map(p => (
+                    <option key={p.id} value={p.id}>{(p.uomId && uomName[p.uomId]) || 'упаковка'}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="border-r border-line bg-surface-2/40 flex items-center justify-end px-2.5">
+                <span className="font-mono text-sm text-muted tabular-nums">{r.product ? fmtMoney(r.product.volume) : '—'}</span>
               </div>
               <div className={CELLBOX}>
                 <GroupedNumberInput value={r.quantity} onChange={n => patchRow(r.key, { quantity: n })} placeholder="0" className={`${CELL} font-mono text-right`} />
@@ -238,13 +274,15 @@ export default function CustomerOrderPage() {
             style={{ gridTemplateColumns: COLS }}
           >
             <div className={GUTTER}><Plus size={13} /></div>
-            <div className="col-span-4 px-2.5 py-2 text-sm text-faint">Добавить товар</div>
+            <div className="col-span-6 px-2.5 py-2 text-sm text-faint">Добавить товар</div>
             <div />
           </button>
 
           {/* Blank canvas */}
           <div className="grid flex-1 bg-surface" style={{ gridTemplateColumns: COLS }} aria-hidden="true">
             <div className={GUTTER} />
+            <div className="border-r border-line" />
+            <div className="border-r border-line" />
             <div className="border-r border-line" />
             <div className="border-r border-line" />
             <div className="border-r border-line" />
@@ -256,6 +294,8 @@ export default function CustomerOrderPage() {
           <div className="grid sticky bottom-0 z-20 bg-surface-2 border-t border-line font-semibold" style={{ gridTemplateColumns: COLS }}>
             <div className={GUTTER} />
             <div className="px-2.5 py-2.5 border-r border-line text-xs uppercase tracking-wide text-muted">Итого</div>
+            <div className="border-r border-line" />
+            <div className="border-r border-line" />
             <div className="border-r border-line" />
             <div className="border-r border-line" />
             <div className="px-2.5 py-2.5 border-r border-line text-right font-mono text-sm text-fg tabular-nums">{fmtMoney(total)}</div>
