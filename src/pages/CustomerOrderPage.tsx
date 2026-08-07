@@ -274,7 +274,9 @@ export default function CustomerOrderPage() {
                   fetch={searchProducts}
                   token={token}
                   placeholder="Выберите товар…"
+                  hideEmpty
                   renderMeta={p => `Ост: ${stockLabel(p)}`}
+                  itemClassName={p => (p.stock < 0 ? 'text-red-500 opacity-50' : '')}
                 />
               </div>
               <div className={CELLBOX}>

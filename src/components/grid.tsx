@@ -31,7 +31,7 @@ export function HeadCell({ label, className = '' }: { label: string; className?:
 // Generic over the option type so callers can carry extra fields (e.g. a product's
 // price) while still displaying { id, name }.
 export function SearchCell<T extends NamedOption>({
-  value, onSelect, fetch, token, placeholder, renderMeta,
+  value, onSelect, fetch, token, placeholder, renderMeta, itemClassName, hideEmpty,
 }: {
   value: T | null
   onSelect: (opt: T | null) => void
@@ -40,6 +40,11 @@ export function SearchCell<T extends NamedOption>({
   placeholder: string
   // Optional secondary text shown on the right of each option (e.g. stock balance).
   renderMeta?: (opt: T) => string | null
+  // Optional extra classes per option (e.g. dim + red for out-of-stock products).
+  itemClassName?: (opt: T) => string
+  // When true, only show the menu if the query is non-empty AND has matches —
+  // no "Загрузка…"/"Ничего не найдено" box, and no menu on an empty field.
+  hideEmpty?: boolean
 }) {
   const [query, setQuery] = useState(value?.name ?? '')
   const [open, setOpen] = useState(false)
@@ -58,6 +63,8 @@ export function SearchCell<T extends NamedOption>({
   }
 
   function openMenu() {
+    // In hideEmpty mode an empty field opens nothing.
+    if (hideEmpty && !query.trim()) return
     if (inputRef.current) setRect(inputRef.current.getBoundingClientRect())
     setOpen(true)
     runSearch(query)
@@ -66,6 +73,7 @@ export function SearchCell<T extends NamedOption>({
   function handleInput(v: string) {
     setQuery(v)
     onSelect(null)
+    if (hideEmpty && !v.trim()) { setItems([]); setOpen(false); return }
     if (inputRef.current) setRect(inputRef.current.getBoundingClientRect())
     setOpen(true)
     runSearch(v)
@@ -107,15 +115,16 @@ export function SearchCell<T extends NamedOption>({
         placeholder={placeholder}
         className={CELL}
       />
-      {open && rect && createPortal(
+      {open && rect && (!hideEmpty || items.length > 0) && createPortal(
         <div
           data-search-menu
           style={{ position: 'fixed', top: rect.bottom + 2, left: rect.left, width: Math.max(rect.width, 200) }}
           className="z-[1000] max-h-60 overflow-y-auto overscroll-contain rounded-md border border-line bg-surface shadow-xl"
         >
-          {loading ? (
+          {/* hideEmpty guarantees items.length > 0 here, so skip the loading/empty rows */}
+          {!hideEmpty && loading ? (
             <div className="px-3 py-2 text-xs text-muted">Загрузка…</div>
-          ) : items.length === 0 ? (
+          ) : !hideEmpty && items.length === 0 ? (
             <div className="px-3 py-2 text-xs text-faint">Ничего не найдено</div>
           ) : items.map(it => {
             const meta = renderMeta?.(it)
@@ -124,7 +133,7 @@ export function SearchCell<T extends NamedOption>({
                 key={it.id}
                 type="button"
                 onClick={() => choose(it)}
-                className="w-full flex items-center gap-2 text-left px-3 py-2 text-sm text-fg hover:bg-surface-2 transition-colors"
+                className={`w-full flex items-center gap-2 text-left px-3 py-2 text-sm text-fg hover:bg-surface-2 transition-colors ${itemClassName?.(it) ?? ''}`}
               >
                 <span className="flex-1 truncate">{it.name}</span>
                 {meta && <span className="shrink-0 text-xs text-muted tabular-nums">{meta}</span>}

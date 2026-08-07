@@ -182,10 +182,10 @@ export interface ProductOption {
  */
 export async function searchProducts(token: string, query: string): Promise<ProductOption[]> {
   const q = query.trim()
+  // No query → no suggestions (the dropdown only opens once the user types).
+  if (!q) return []
   // stockStore=... could scope to one store; without it MoySklad returns aggregate stock.
-  const params: Record<string, string> = q
-    ? { search: q, limit: '20' }
-    : { limit: '20' }
+  const params: Record<string, string> = { search: q, limit: '20' }
   type Row = {
     id: string; name: string; meta: { type: string }
     salePrices?: Array<{ value: number }>
@@ -205,7 +205,10 @@ export async function searchProducts(token: string, query: string): Promise<Prod
     const v = typeof raw === 'object' && raw !== null ? Number((raw as { value?: unknown }).value) : Number(raw)
     return isFinite(v) ? v : 0
   }
-  return (data.rows ?? []).map(r => ({
+  // MoySklad `search` also matches code/article/description; keep only rows whose
+  // *name* contains the typed text, so the list shows exactly what the user typed.
+  const ql = q.toLowerCase()
+  return (data.rows ?? []).filter(r => (r.name ?? '').toLowerCase().includes(ql)).map(r => ({
     id: r.id,
     name: r.name,
     type: r.meta?.type ?? 'product',
