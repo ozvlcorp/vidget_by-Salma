@@ -2,11 +2,19 @@ import { useState, useRef, useEffect } from 'react'
 import { Plus, X, Loader2 } from 'lucide-react'
 import {
   getOrganizations, getStores, searchCounterparties, searchProducts, createCustomerOrder,
+  getCurrencies, getOrderStates,
   type NamedOption, type OrganizationOption, type StoreOption, type ProductOption,
+  type CurrencyRate, type OrderState,
 } from '../api/moysklad'
 import { useAppContext } from '../context/AppContext'
 import { GroupedNumberInput } from '../components/GroupedNumberInput'
 import { CELL, CELLBOX, GUTTER, HeadCell, SearchCell, todayStr, fmtMoney } from '../components/grid'
+
+type Cur = 'UZS' | 'USD'
+const CURRENCIES: Array<{ value: Cur; label: string }> = [
+  { value: 'UZS', label: 'сум' },
+  { value: 'USD', label: 'доллар' },
+]
 
 // Position row: товар, количество, цена, (сумма = кол-во × цена)
 interface Pos {
@@ -32,6 +40,15 @@ export default function CustomerOrderPage() {
   const [agent, setAgent] = useState<NamedOption | null>(null)
   const [date, setDate] = useState(todayStr())
 
+  // Currency (like the payments section): сум → order in UZS with a rate; доллар → base USD
+  const [currency, setCurrency] = useState<Cur>('UZS')
+  const [rate, setRate] = useState(0)
+  const [uzsCurrency, setUzsCurrency] = useState<CurrencyRate | null>(null)
+
+  // Status (Статус)
+  const [states, setStates] = useState<OrderState[]>([])
+  const [stateId, setStateId] = useState('')
+
   const [rows, setRows] = useState<Pos[]>([{ key: 'p-0', product: null, quantity: 1, price: 0 }])
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -44,6 +61,12 @@ export default function CustomerOrderPage() {
     getStores(token)
       .then(ss => { setStores(ss); if (ss.length) setStoreId(prev => prev || ss[0].id) })
       .catch(() => setStores([]))
+    getCurrencies(token)
+      .then(cs => setUzsCurrency(cs.find(c => c.isoCode === 'UZS') ?? null))
+      .catch(() => setUzsCurrency(null))
+    getOrderStates(token)
+      .then(setStates)
+      .catch(() => setStates([]))
   }, [token])
 
   function freshRow(): Pos {
@@ -62,18 +85,27 @@ export default function CustomerOrderPage() {
 
   const sumOf = (r: Pos) => r.quantity * r.price
   const total = rows.reduce((s, r) => s + sumOf(r), 0)
+  // USD equivalent of the total: доллар → as-is; сум → total / Курс
+  const totalUsd = currency === 'USD' ? total : (rate > 0 ? total / rate : 0)
   const validRows = rows.filter(r => r.product && r.quantity > 0)
+  const needsRate = currency === 'UZS'
   const canSubmit = !submitting && !!orgId && !!agent && validRows.length > 0
+    && (!needsRate || (!!uzsCurrency && rate > 0))
 
   async function handleSubmit() {
     if (!agent) return
     setSubmitting(true); setError(null); setOkMsg(null)
     try {
+      const state = states.find(s => s.id === stateId)
       const doc = await createCustomerOrder(token, {
         organizationId: orgId,
         agentId: agent.id,
         storeId: storeId || undefined,
         moment: `${date} 12:00:00`,
+        // сум → document currency = сум with rate 1/Курс; доллар → base currency
+        currencyId: currency === 'UZS' ? uzsCurrency?.id : undefined,
+        rateValue: currency === 'UZS' ? 1 / rate : undefined,
+        stateMeta: state?.meta,
         positions: validRows.map(r => ({
           assortmentId: r.product!.id,
           assortmentType: r.product!.type,
@@ -118,9 +150,30 @@ export default function CustomerOrderPage() {
         </label>
         <label className="flex items-center gap-1.5 text-xs text-muted">
           Контрагент:
-          <div className="w-56 rounded-md border border-line bg-surface">
+          <div className="w-52 rounded-md border border-line bg-surface">
             <SearchCell value={agent} onSelect={setAgent} fetch={searchCounterparties} token={token} placeholder="Выберите контрагента…" />
           </div>
+        </label>
+        <label className="flex items-center gap-1.5 text-xs text-muted">
+          Валюта:
+          <select value={currency} onChange={e => setCurrency(e.target.value as Cur)} className={FIELD}>
+            {CURRENCIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+          </select>
+        </label>
+        {currency === 'UZS' && (
+          <label className="flex items-center gap-1.5 text-xs text-muted">
+            Курс:
+            <div className="w-24 rounded-md border border-line bg-surface">
+              <GroupedNumberInput value={rate} onChange={setRate} placeholder="0" className={`${CELL} font-mono text-right`} />
+            </div>
+          </label>
+        )}
+        <label className="flex items-center gap-1.5 text-xs text-muted">
+          Статус:
+          <select value={stateId} onChange={e => setStateId(e.target.value)} className={`${FIELD} max-w-[180px]`}>
+            <option value="">— не задан —</option>
+            {states.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
         </label>
         <div className="flex-1" />
         <button
@@ -214,7 +267,10 @@ export default function CustomerOrderPage() {
       {/* Status bar */}
       <div className="shrink-0 h-7 flex items-center gap-4 px-3 border-t border-line bg-surface-2 text-[11px] text-faint">
         <span>Позиций: {rows.length}</span>
-        <span className="tabular-nums">Итого: {fmtMoney(total)}</span>
+        <span className="tabular-nums">
+          Итого: {fmtMoney(total)} {currency === 'UZS' ? 'сум' : '$'}
+          {currency === 'UZS' && rate > 0 && <> · ${fmtMoney(totalUsd)}</>}
+        </span>
         <div className="flex-1" />
         {okMsg && <span className="text-green-600">✓ {okMsg}</span>}
         {error && <span className="text-red-600">Ошибка: {error}</span>}

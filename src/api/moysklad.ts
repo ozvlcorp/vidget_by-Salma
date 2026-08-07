@@ -170,6 +170,17 @@ export async function searchProducts(token: string, query: string): Promise<Prod
   }))
 }
 
+/** A configurable order state (Статус) from the customerorder metadata. */
+export interface OrderState { id: string; name: string; meta: Record<string, unknown> }
+
+/** Available statuses (состояния) for a customer order. */
+export async function getOrderStates(token: string): Promise<OrderState[]> {
+  const data = await get<{ states?: Array<{ id: string; name: string; meta: Record<string, unknown> }> }>(
+    '/entity/customerorder/metadata', {}, token
+  ).catch(() => ({ states: [] as Array<{ id: string; name: string; meta: Record<string, unknown> }> }))
+  return (data.states ?? []).map(s => ({ id: s.id, name: s.name, meta: s.meta }))
+}
+
 export interface OrderPositionInput {
   assortmentId: string
   assortmentType: string   // 'product' | 'variant' | 'service' | ...
@@ -184,6 +195,7 @@ export interface CreateOrderParams {
   moment?: string          // "YYYY-MM-DD HH:MM:SS"
   currencyId?: string      // omit → base currency
   rateValue?: number       // base per 1 unit of currencyId
+  stateMeta?: Record<string, unknown>  // chosen status meta
   positions: OrderPositionInput[]
 }
 
@@ -200,6 +212,7 @@ export async function createCustomerOrder(token: string, p: CreateOrderParams): 
   }
   if (p.storeId) body.store = msRef('store', p.storeId)
   if (p.moment) body.moment = p.moment
+  if (p.stateMeta) body.state = { meta: p.stateMeta }
   if (p.currencyId) {
     body.rate = p.rateValue != null && p.rateValue > 0
       ? { currency: msRef('currency', p.currencyId), value: p.rateValue }
