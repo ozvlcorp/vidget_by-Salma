@@ -142,9 +142,9 @@ export default function CustomerOrderPage() {
   const unitPriceUsdOf = (r: Pos) => (r.product?.volume ?? 0) * r.pricePerLiter
   // Та же цена в валюте заказа (для сум умножаем на курс)
   const unitPriceMajorOf = (r: Pos) => (currency === 'UZS' ? unitPriceUsdOf(r) * rate : unitPriceUsdOf(r))
-  // Сумма позиции считается ТОЧНО как в МойСклад: цена округляется до копеек,
-  // затем умножается на количество базовых единиц (документ создаётся в шт).
-  const sumOf = (r: Pos) => (Math.round(unitPriceMajorOf(r) * 100) / 100) * baseQtyOf(r)
+  // Сумма позиции = ОБЪЁМ (литраж) × ЦЕНА ЗА ЛИТР — точный расчёт, без потери копеек.
+  const amountUsdOf = (r: Pos) => litersOf(r) * r.pricePerLiter
+  const sumOf = (r: Pos) => (currency === 'UZS' ? amountUsdOf(r) * rate : amountUsdOf(r))
   const total = rows.reduce((s, r) => s + sumOf(r), 0)
   const totalUsd = currency === 'UZS' && rate > 0 ? total / rate : total
   const totalLiters = rows.reduce((s, r) => s + litersOf(r), 0)
