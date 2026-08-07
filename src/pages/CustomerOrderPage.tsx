@@ -1,0 +1,225 @@
+import { useState, useRef, useEffect } from 'react'
+import { Plus, X, Loader2 } from 'lucide-react'
+import {
+  getOrganizations, getStores, searchCounterparties, searchProducts, createCustomerOrder,
+  type NamedOption, type OrganizationOption, type StoreOption, type ProductOption,
+} from '../api/moysklad'
+import { useAppContext } from '../context/AppContext'
+import { GroupedNumberInput } from '../components/GroupedNumberInput'
+import { CELL, CELLBOX, GUTTER, HeadCell, SearchCell, todayStr, fmtMoney } from '../components/grid'
+
+// Position row: товар, количество, цена, (сумма = кол-во × цена)
+interface Pos {
+  key: string
+  product: ProductOption | null
+  quantity: number
+  price: number   // за единицу, в major-единицах (сум)
+}
+
+// gutter · товар · количество · цена · сумма · удалить
+const COLS = '44px 1.4fr 130px 150px 170px 40px'
+
+const FIELD = 'h-8 px-2 rounded-md border border-line bg-surface text-fg text-xs'
+
+export default function CustomerOrderPage() {
+  const { token } = useAppContext()
+  const nextKey = useRef(1)
+
+  const [organizations, setOrganizations] = useState<OrganizationOption[] | null>(null)
+  const [orgId, setOrgId] = useState('')
+  const [stores, setStores] = useState<StoreOption[] | null>(null)
+  const [storeId, setStoreId] = useState('')
+  const [agent, setAgent] = useState<NamedOption | null>(null)
+  const [date, setDate] = useState(todayStr())
+
+  const [rows, setRows] = useState<Pos[]>([{ key: 'p-0', product: null, quantity: 1, price: 0 }])
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [okMsg, setOkMsg] = useState<string | null>(null)
+
+  useEffect(() => {
+    getOrganizations(token)
+      .then(orgs => { setOrganizations(orgs); if (orgs.length) setOrgId(prev => prev || orgs[0].id) })
+      .catch(() => setOrganizations([]))
+    getStores(token)
+      .then(ss => { setStores(ss); if (ss.length) setStoreId(prev => prev || ss[0].id) })
+      .catch(() => setStores([]))
+  }, [token])
+
+  function freshRow(): Pos {
+    return { key: `p-${nextKey.current++}`, product: null, quantity: 1, price: 0 }
+  }
+  function addRow() { setOkMsg(null); setRows(rs => [...rs, freshRow()]) }
+  function removeRow(key: string) { setRows(rs => (rs.length > 1 ? rs.filter(r => r.key !== key) : rs)) }
+  function patchRow(key: string, patch: Partial<Pos>) {
+    setOkMsg(null)
+    setRows(rs => rs.map(r => (r.key === key ? { ...r, ...patch } : r)))
+  }
+  // Picking a product auto-fills its sale price.
+  function pickProduct(key: string, p: ProductOption | null) {
+    patchRow(key, { product: p, price: p ? p.salePrice / 100 : 0 })
+  }
+
+  const sumOf = (r: Pos) => r.quantity * r.price
+  const total = rows.reduce((s, r) => s + sumOf(r), 0)
+  const validRows = rows.filter(r => r.product && r.quantity > 0)
+  const canSubmit = !submitting && !!orgId && !!agent && validRows.length > 0
+
+  async function handleSubmit() {
+    if (!agent) return
+    setSubmitting(true); setError(null); setOkMsg(null)
+    try {
+      const doc = await createCustomerOrder(token, {
+        organizationId: orgId,
+        agentId: agent.id,
+        storeId: storeId || undefined,
+        moment: `${date} 12:00:00`,
+        positions: validRows.map(r => ({
+          assortmentId: r.product!.id,
+          assortmentType: r.product!.type,
+          quantity: r.quantity,
+          priceMajor: r.price,
+        })),
+      })
+      setOkMsg(`Заказ создан${doc.name ? ` № ${doc.name}` : ''}`)
+      // Reset to an empty order
+      setRows([freshRow()])
+      setAgent(null)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="h-full flex flex-col overflow-hidden bg-base text-fg">
+      {/* Order header */}
+      <div className="shrink-0 border-b border-line bg-surface px-3 py-2 flex flex-wrap items-center gap-x-4 gap-y-2">
+        <label className="flex items-center gap-1.5 text-xs text-muted">
+          Юр. лицо:
+          {organizations === null ? <span className="text-faint">…</span> : (
+            <select value={orgId} onChange={e => setOrgId(e.target.value)} className={`${FIELD} max-w-[200px]`}>
+              {organizations.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+            </select>
+          )}
+        </label>
+        <label className="flex items-center gap-1.5 text-xs text-muted">
+          Склад:
+          {stores === null ? <span className="text-faint">…</span> : stores.length === 0 ? <span className="text-faint">нет</span> : (
+            <select value={storeId} onChange={e => setStoreId(e.target.value)} className={`${FIELD} max-w-[180px]`}>
+              {stores.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          )}
+        </label>
+        <label className="flex items-center gap-1.5 text-xs text-muted">
+          Дата:
+          <input type="date" value={date} onChange={e => setDate(e.target.value)} className={`${FIELD} font-mono`} />
+        </label>
+        <label className="flex items-center gap-1.5 text-xs text-muted">
+          Контрагент:
+          <div className="w-56 rounded-md border border-line bg-surface">
+            <SearchCell value={agent} onSelect={setAgent} fetch={searchCounterparties} token={token} placeholder="Выберите контрагента…" />
+          </div>
+        </label>
+        <div className="flex-1" />
+        <button
+          type="button"
+          onClick={handleSubmit}
+          disabled={!canSubmit}
+          className="flex items-center gap-1.5 h-8 px-4 rounded-md bg-accent text-white text-xs font-semibold hover:bg-accent-strong transition-all disabled:opacity-40"
+        >
+          {submitting && <Loader2 size={13} className="animate-spin" />}
+          {submitting ? 'Создание…' : 'Создать заказ'}
+        </button>
+      </div>
+
+      {/* Positions grid */}
+      <div className="flex-1 overflow-auto">
+        <div style={{ minWidth: 760 }} className="min-h-full flex flex-col">
+          {/* Header */}
+          <div className="grid sticky top-0 z-20 bg-surface-2 border-b border-line shadow-sm" style={{ gridTemplateColumns: COLS }}>
+            <div className={GUTTER} />
+            <HeadCell label="Товар" />
+            <HeadCell label="Количество" className="text-right" />
+            <HeadCell label="Цена" className="text-right" />
+            <HeadCell label="Сумма" className="text-right" />
+            <div className="border-line" />
+          </div>
+
+          {/* Rows */}
+          {rows.map((r, i) => (
+            <div key={r.key} className="grid border-b border-line bg-surface hover:bg-surface-2/40 transition-colors" style={{ gridTemplateColumns: COLS }}>
+              <div className={GUTTER}>{i + 1}</div>
+              <div className={CELLBOX}>
+                <SearchCell value={r.product} onSelect={p => pickProduct(r.key, p)} fetch={searchProducts} token={token} placeholder="Выберите товар…" />
+              </div>
+              <div className={CELLBOX}>
+                <GroupedNumberInput value={r.quantity} onChange={n => patchRow(r.key, { quantity: n })} placeholder="0" className={`${CELL} font-mono text-right`} />
+              </div>
+              <div className={CELLBOX}>
+                <GroupedNumberInput value={r.price} onChange={n => patchRow(r.key, { price: n })} placeholder="0" className={`${CELL} font-mono text-right`} />
+              </div>
+              <div className="border-r border-line bg-surface-2/40 flex items-center justify-end px-2.5">
+                <span className="font-mono text-sm text-muted tabular-nums">{fmtMoney(sumOf(r))}</span>
+              </div>
+              <div className="flex items-center justify-center bg-surface">
+                <button
+                  type="button"
+                  onClick={() => removeRow(r.key)}
+                  disabled={rows.length === 1}
+                  title="Удалить строку"
+                  className="w-7 h-7 rounded flex items-center justify-center text-faint hover:text-red-500 hover:bg-red-500/10 transition-all disabled:opacity-30 disabled:hover:text-faint disabled:hover:bg-transparent"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            </div>
+          ))}
+
+          {/* Add-row strip */}
+          <button
+            type="button"
+            onClick={addRow}
+            className="grid w-full text-left border-b border-line bg-surface hover:bg-surface-2/50 transition-colors"
+            style={{ gridTemplateColumns: COLS }}
+          >
+            <div className={GUTTER}><Plus size={13} /></div>
+            <div className="col-span-4 px-2.5 py-2 text-sm text-faint">Добавить товар</div>
+            <div />
+          </button>
+
+          {/* Blank canvas */}
+          <div className="grid flex-1 bg-surface" style={{ gridTemplateColumns: COLS }} aria-hidden="true">
+            <div className={GUTTER} />
+            <div className="border-r border-line" />
+            <div className="border-r border-line" />
+            <div className="border-r border-line" />
+            <div className="border-r border-line" />
+            <div />
+          </div>
+
+          {/* Totals */}
+          <div className="grid sticky bottom-0 z-20 bg-surface-2 border-t border-line font-semibold" style={{ gridTemplateColumns: COLS }}>
+            <div className={GUTTER} />
+            <div className="px-2.5 py-2.5 border-r border-line text-xs uppercase tracking-wide text-muted">Итого</div>
+            <div className="border-r border-line" />
+            <div className="border-r border-line" />
+            <div className="px-2.5 py-2.5 border-r border-line text-right font-mono text-sm text-fg tabular-nums">{fmtMoney(total)}</div>
+            <div />
+          </div>
+        </div>
+      </div>
+
+      {/* Status bar */}
+      <div className="shrink-0 h-7 flex items-center gap-4 px-3 border-t border-line bg-surface-2 text-[11px] text-faint">
+        <span>Позиций: {rows.length}</span>
+        <span className="tabular-nums">Итого: {fmtMoney(total)}</span>
+        <div className="flex-1" />
+        {okMsg && <span className="text-green-600">✓ {okMsg}</span>}
+        {error && <span className="text-red-600">Ошибка: {error}</span>}
+        {!okMsg && !error && <span>Заказ покупателя · МойСклад</span>}
+      </div>
+    </div>
+  )
+}

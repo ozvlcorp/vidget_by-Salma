@@ -10,6 +10,7 @@ import {
 import { useAppContext } from '../context/AppContext'
 import { ThemeToggle } from '../components/ThemeToggle'
 import { GroupedNumberInput } from '../components/GroupedNumberInput'
+import { CELL, CELLBOX, GUTTER, HeadCell, SearchCell, todayStr, fmtMoney } from '../components/grid'
 
 // ─── Table model ────────────────────────────────────────────────────────────
 type Cur = 'UZS' | 'USD'   // сум или доллар
@@ -41,128 +42,7 @@ const CURRENCIES: Array<{ value: Cur; label: string }> = [
 // Leading 44px = Excel-style row-number gutter; trailing 40px = delete control.
 const COLS = '44px 142px 1.2fr 92px 130px 88px 124px 1.2fr 166px 40px'
 
-const CELL = 'w-full px-2.5 py-2 text-sm bg-transparent focus:outline-none text-fg placeholder-faint'
-// Editable cell wrapper: right gridline + Excel "active cell" ring on focus.
-const CELLBOX = 'relative border-r border-line focus-within:z-10 focus-within:ring-2 focus-within:ring-accent focus-within:ring-inset'
-
-function todayStr(): string {
-  const d = new Date()
-  const p = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
-}
-
-function fmtUsd(n: number): string {
-  return n.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-}
-
-function HeadCell({ label, className = '' }: { label: string; className?: string }) {
-  return <div className={`px-2.5 py-2.5 text-xs font-bold uppercase tracking-wide text-fg border-r border-line ${className}`}>{label}</div>
-}
-
-// ─── Searchable dropdown cell (portal so it never gets clipped by the table) ──
-function SearchCell({
-  value, onSelect, fetch, token, placeholder,
-}: {
-  value: NamedOption | null
-  onSelect: (opt: NamedOption | null) => void
-  fetch: (token: string, query: string) => Promise<NamedOption[]>
-  token: string
-  placeholder: string
-}) {
-  const [query, setQuery] = useState(value?.name ?? '')
-  const [open, setOpen] = useState(false)
-  const [items, setItems] = useState<NamedOption[]>([])
-  const [loading, setLoading] = useState(false)
-  const [rect, setRect] = useState<DOMRect | null>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
-  const debounce = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  function runSearch(q: string) {
-    if (debounce.current) clearTimeout(debounce.current)
-    setLoading(true)
-    debounce.current = setTimeout(() => {
-      fetch(token, q).then(setItems).finally(() => setLoading(false))
-    }, 200)
-  }
-
-  function openMenu() {
-    if (inputRef.current) setRect(inputRef.current.getBoundingClientRect())
-    setOpen(true)
-    runSearch(query)
-  }
-
-  function handleInput(v: string) {
-    setQuery(v)
-    onSelect(null)
-    if (inputRef.current) setRect(inputRef.current.getBoundingClientRect())
-    setOpen(true)
-    runSearch(v)
-  }
-
-  function choose(opt: NamedOption) {
-    onSelect(opt)
-    setQuery(opt.name)
-    setOpen(false)
-  }
-
-  useEffect(() => {
-    if (!open) return
-    function onDocDown(e: MouseEvent) {
-      const target = e.target as HTMLElement
-      if (inputRef.current && !inputRef.current.contains(target) && !target.closest('[data-search-menu]')) {
-        setOpen(false)
-      }
-    }
-    // Reposition (not close) on scroll, so the menu follows the input when the
-    // table scrolls AND stays open while the user scrolls inside the menu itself.
-    function reposition() { if (inputRef.current) setRect(inputRef.current.getBoundingClientRect()) }
-    document.addEventListener('mousedown', onDocDown)
-    document.addEventListener('scroll', reposition, true)
-    window.addEventListener('resize', reposition)
-    return () => {
-      document.removeEventListener('mousedown', onDocDown)
-      document.removeEventListener('scroll', reposition, true)
-      window.removeEventListener('resize', reposition)
-    }
-  }, [open])
-
-  return (
-    <>
-      <input
-        ref={inputRef}
-        type="text"
-        value={query}
-        onChange={(e: ChangeEvent<HTMLInputElement>) => handleInput(e.target.value)}
-        onFocus={openMenu}
-        placeholder={placeholder}
-        className={CELL}
-      />
-      {open && rect && createPortal(
-        <div
-          data-search-menu
-          style={{ position: 'fixed', top: rect.bottom + 2, left: rect.left, width: Math.max(rect.width, 200) }}
-          className="z-[1000] max-h-60 overflow-y-auto overscroll-contain rounded-md border border-line bg-surface shadow-xl"
-        >
-          {loading ? (
-            <div className="px-3 py-2 text-xs text-muted">Загрузка…</div>
-          ) : items.length === 0 ? (
-            <div className="px-3 py-2 text-xs text-faint">Ничего не найдено</div>
-          ) : items.map(it => (
-            <button
-              key={it.id}
-              type="button"
-              onClick={() => choose(it)}
-              className="w-full text-left px-3 py-2 text-sm text-fg hover:bg-surface-2 transition-colors"
-            >
-              {it.name}
-            </button>
-          ))}
-        </div>,
-        document.body,
-      )}
-    </>
-  )
-}
+const fmtUsd = fmtMoney
 
 // ─── Фирма cell — free text with suggestions from the "От кого" справочник ────
 function FirmCell({
@@ -372,10 +252,10 @@ export default function PaymentWidgetPage() {
 
   const errorCount = Object.values(results).filter(r => r.status === 'error').length
 
-  const gutter = 'flex items-center justify-center bg-surface-2 border-r border-line text-xs text-faint font-mono select-none'
+  const gutter = GUTTER
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden bg-base text-fg">
+    <div className="h-full flex flex-col overflow-hidden bg-base text-fg">
       {/* Toolbar */}
       <div className="shrink-0 h-12 flex items-center gap-2 px-3 border-b border-line bg-surface">
         <span className="font-bold text-sm tracking-tight">Разбивка платежа</span>

@@ -133,6 +133,97 @@ export async function searchCounterparties(token: string, query: string): Promis
   return data.rows.filter(c => !c.archived).map(c => ({ id: c.id, name: c.name }))
 }
 
+// ─── Customer order (Заказ покупателя) ────────────────────────────────────────
+
+export interface StoreOption { id: string; name: string }
+
+/** Warehouses (склады) for the store dropdown. */
+export async function getStores(token: string): Promise<StoreOption[]> {
+  const data = await get<{ rows: Array<{ id: string; name: string; archived?: boolean }> }>(
+    '/entity/store', { limit: '100' }, token
+  ).catch(() => ({ rows: [] as Array<{ id: string; name: string; archived?: boolean }> }))
+  return data.rows.filter(s => !s.archived).map(s => ({ id: s.id, name: s.name }))
+}
+
+/** A product/variant/service from the assortment, with its sale price (in minor units). */
+export interface ProductOption { id: string; name: string; type: string; salePrice: number }
+
+/**
+ * Assortment search for order positions. Returns products/variants/services with
+ * their default sale price (kopecks). `type` is needed to reference the right entity.
+ */
+export async function searchProducts(token: string, query: string): Promise<ProductOption[]> {
+  const q = query.trim()
+  const params: Record<string, string> = q
+    ? { search: q, limit: '20' }
+    : { limit: '20' }
+  const data = await get<{ rows: Array<{
+    id: string; name: string; meta: { type: string }
+    salePrices?: Array<{ value: number }>
+  }> }>('/entity/assortment', params, token)
+    .catch(() => ({ rows: [] as Array<{ id: string; name: string; meta: { type: string }; salePrices?: Array<{ value: number }> }> }))
+  return (data.rows ?? []).map(r => ({
+    id: r.id,
+    name: r.name,
+    type: r.meta?.type ?? 'product',
+    salePrice: r.salePrices?.[0]?.value ?? 0,
+  }))
+}
+
+export interface OrderPositionInput {
+  assortmentId: string
+  assortmentType: string   // 'product' | 'variant' | 'service' | ...
+  quantity: number
+  priceMajor: number       // price per unit in major units (сум)
+}
+
+export interface CreateOrderParams {
+  organizationId: string
+  agentId: string
+  storeId?: string
+  moment?: string          // "YYYY-MM-DD HH:MM:SS"
+  currencyId?: string      // omit → base currency
+  rateValue?: number       // base per 1 unit of currencyId
+  positions: OrderPositionInput[]
+}
+
+/** Creates a customer order (заказ покупателя) with its positions. */
+export async function createCustomerOrder(token: string, p: CreateOrderParams): Promise<CreatedDoc> {
+  const body: Record<string, unknown> = {
+    organization: msRef('organization', p.organizationId),
+    agent: msRef('counterparty', p.agentId),
+    positions: p.positions.map(pos => ({
+      quantity: pos.quantity,
+      price: Math.round(pos.priceMajor * 100),
+      assortment: msRef(pos.assortmentType, pos.assortmentId),
+    })),
+  }
+  if (p.storeId) body.store = msRef('store', p.storeId)
+  if (p.moment) body.moment = p.moment
+  if (p.currencyId) {
+    body.rate = p.rateValue != null && p.rateValue > 0
+      ? { currency: msRef('currency', p.currencyId), value: p.rateValue }
+      : { currency: msRef('currency', p.currencyId) }
+  }
+
+  const r = await msFetch(`${BASE}/entity/customerorder`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!r.ok) {
+    const text = await r.text().catch(() => '')
+    let msg = `HTTP ${r.status}`
+    try {
+      const parsed = JSON.parse(text) as { errors?: Array<{ error?: string }> }
+      if (parsed?.errors?.[0]?.error) msg = parsed.errors[0].error!
+    } catch { /* not JSON */ }
+    throw new Error(msg)
+  }
+  const data = await r.json() as { id: string; name?: string; meta?: { uuidHref?: string } }
+  return { id: data.id, name: data.name ?? null, uuidHref: data.meta?.uuidHref ?? null }
+}
+
 export type PaymentDocType = 'cashin' | 'paymentin'
 
 /** A custom attribute (доп. поле) defined on a document type's metadata. */

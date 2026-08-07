@@ -6,6 +6,7 @@ import { parseLang } from './i18n'
 import type { Lang } from './i18n'
 import { t } from './i18n'
 import PaymentWidgetPage from './pages/PaymentWidgetPage'
+import CustomerOrderPage from './pages/CustomerOrderPage'
 
 const BACKEND_URL = 'https://widget-backend.oymoysklad.com'
 // TODO: set this to whatever name this widget is registered under on the backend above.
@@ -87,8 +88,43 @@ function App() {
 
   return (
     <AppContext.Provider value={{ token, lang, setLang, currencies, setCurrencies, theme, setTheme }}>
-      <PaymentWidgetPage />
+      <Shell />
     </AppContext.Provider>
+  )
+}
+
+type Section = 'payment' | 'order'
+
+const SECTIONS: Array<{ id: Section; label: string }> = [
+  { id: 'payment', label: 'Разбивка платежа' },
+  { id: 'order', label: 'Заказ покупателя' },
+]
+
+function Shell() {
+  const [section, setSection] = useState<Section>('payment')
+  return (
+    <div className="h-screen flex flex-col overflow-hidden bg-base">
+      {/* Section tabs */}
+      <nav className="shrink-0 h-10 flex items-end gap-1 px-3 border-b border-line bg-surface-2">
+        {SECTIONS.map(s => (
+          <button
+            key={s.id}
+            type="button"
+            onClick={() => setSection(s.id)}
+            className={`px-4 h-9 -mb-px text-sm font-medium border-b-2 transition-colors ${
+              section === s.id
+                ? 'border-accent text-accent'
+                : 'border-transparent text-muted hover:text-fg'
+            }`}
+          >
+            {s.label}
+          </button>
+        ))}
+      </nav>
+      <div className="flex-1 overflow-hidden">
+        {section === 'payment' ? <PaymentWidgetPage /> : <CustomerOrderPage />}
+      </div>
+    </div>
   )
 }
 
