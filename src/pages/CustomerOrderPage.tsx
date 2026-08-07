@@ -138,11 +138,15 @@ export default function CustomerOrderPage() {
   const baseQtyOf = (r: Pos) => r.quantity * factorOf(r)     // всего базовых единиц (шт)
   // Литраж позиции: объём из карточки (за 1 шт) × количество в базовых единицах
   const litersOf = (r: Pos) => (r.product?.volume ?? 0) * baseQtyOf(r)
-  // Сумма позиции = литраж × цена за литр (в долларах), затем в валюту заказа
-  const amountUsdOf = (r: Pos) => litersOf(r) * r.pricePerLiter
-  const sumOf = (r: Pos) => (currency === 'UZS' ? amountUsdOf(r) * rate : amountUsdOf(r))
+  // Цена за ОДНУ базовую единицу (шт) = объём(л за шт) × цена за литр, в долларах
+  const unitPriceUsdOf = (r: Pos) => (r.product?.volume ?? 0) * r.pricePerLiter
+  // Та же цена в валюте заказа (для сум умножаем на курс)
+  const unitPriceMajorOf = (r: Pos) => (currency === 'UZS' ? unitPriceUsdOf(r) * rate : unitPriceUsdOf(r))
+  // Сумма позиции считается ТОЧНО как в МойСклад: цена округляется до копеек,
+  // затем умножается на количество базовых единиц (документ создаётся в шт).
+  const sumOf = (r: Pos) => (Math.round(unitPriceMajorOf(r) * 100) / 100) * baseQtyOf(r)
   const total = rows.reduce((s, r) => s + sumOf(r), 0)
-  const totalUsd = rows.reduce((s, r) => s + amountUsdOf(r), 0)
+  const totalUsd = currency === 'UZS' && rate > 0 ? total / rate : total
   const totalLiters = rows.reduce((s, r) => s + litersOf(r), 0)
   // Base unit label (e.g. шт) for a row's product
   const baseUnitLabel = (r: Pos) => (r.product?.uomId && uomName[r.product.uomId]) || 'шт'
@@ -171,21 +175,16 @@ export default function CustomerOrderPage() {
         rateValue: currency === 'UZS' ? 1 / rate : undefined,
         stateMeta: state?.meta,
         contractId: contractId || undefined,
-        positions: validRows.map(r => {
-          const pack = packOf(r)
-          // Цена за базовую единицу (шт) = объём(л за шт) × цена за литр, в валюте заказа
-          const priceUsdPerUnit = (r.product!.volume ?? 0) * r.pricePerLiter
-          const priceMajor = currency === 'UZS' ? priceUsdPerUnit * rate : priceUsdPerUnit
-          return {
-            assortmentId: r.product!.id,
-            assortmentType: r.product!.type,
-            quantity: r.quantity,   // в упаковках, если выбрана упаковка; иначе в базовых единицах
-            priceMajor,
-            pack: pack
-              ? { id: pack.id, quantity: pack.quantity, ...(pack.uomMeta ? { uom: { meta: pack.uomMeta } } : {}) }
-              : undefined,
-          }
-        }),
+        positions: validRows.map(r => ({
+          assortmentId: r.product!.id,
+          assortmentType: r.product!.type,
+          // Количество в БАЗОВЫХ единицах (шт): коробки уже разложены в шт.
+          // Так сумма в МойСклад = цена × количество и точно совпадает с виджетом,
+          // без неоднозначностей в расчёте упаковок.
+          quantity: baseQtyOf(r),
+          // Цена за одну базовую единицу (шт) в валюте заказа.
+          priceMajor: unitPriceMajorOf(r),
+        })),
       })
       setOkMsg(`Заказ создан${doc.name ? ` № ${doc.name}` : ''}`)
       // Reset to an empty order
