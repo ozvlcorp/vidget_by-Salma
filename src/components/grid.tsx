@@ -31,13 +31,15 @@ export function HeadCell({ label, className = '' }: { label: string; className?:
 // Generic over the option type so callers can carry extra fields (e.g. a product's
 // price) while still displaying { id, name }.
 export function SearchCell<T extends NamedOption>({
-  value, onSelect, fetch, token, placeholder,
+  value, onSelect, fetch, token, placeholder, renderMeta,
 }: {
   value: T | null
   onSelect: (opt: T | null) => void
   fetch: (token: string, query: string) => Promise<T[]>
   token: string
   placeholder: string
+  // Optional secondary text shown on the right of each option (e.g. stock balance).
+  renderMeta?: (opt: T) => string | null
 }) {
   const [query, setQuery] = useState(value?.name ?? '')
   const [open, setOpen] = useState(false)
@@ -115,16 +117,20 @@ export function SearchCell<T extends NamedOption>({
             <div className="px-3 py-2 text-xs text-muted">Загрузка…</div>
           ) : items.length === 0 ? (
             <div className="px-3 py-2 text-xs text-faint">Ничего не найдено</div>
-          ) : items.map(it => (
-            <button
-              key={it.id}
-              type="button"
-              onClick={() => choose(it)}
-              className="w-full text-left px-3 py-2 text-sm text-fg hover:bg-surface-2 transition-colors"
-            >
-              {it.name}
-            </button>
-          ))}
+          ) : items.map(it => {
+            const meta = renderMeta?.(it)
+            return (
+              <button
+                key={it.id}
+                type="button"
+                onClick={() => choose(it)}
+                className="w-full flex items-center gap-2 text-left px-3 py-2 text-sm text-fg hover:bg-surface-2 transition-colors"
+              >
+                <span className="flex-1 truncate">{it.name}</span>
+                {meta && <span className="shrink-0 text-xs text-muted tabular-nums">{meta}</span>}
+              </button>
+            )
+          })}
         </div>,
         document.body,
       )}

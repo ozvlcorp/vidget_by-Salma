@@ -172,6 +172,7 @@ export interface ProductOption {
   pricePerLiter: number                 // «Цена за литр (доллар)» — доп. поле, в долларах
   volume: number                        // объём из карточки товара (per base unit)
   uomId: string | null                  // base unit of measure
+  stock: number                         // остаток (доступно) в базовых единицах
   packs: ProductPack[]
 }
 
@@ -181,6 +182,7 @@ export interface ProductOption {
  */
 export async function searchProducts(token: string, query: string): Promise<ProductOption[]> {
   const q = query.trim()
+  // stockStore=... could scope to one store; without it MoySklad returns aggregate stock.
   const params: Record<string, string> = q
     ? { search: q, limit: '20' }
     : { limit: '20' }
@@ -188,6 +190,8 @@ export async function searchProducts(token: string, query: string): Promise<Prod
     id: string; name: string; meta: { type: string }
     salePrices?: Array<{ value: number }>
     volume?: number
+    stock?: number
+    quantity?: number
     uom?: { meta?: { href?: string } }
     packs?: Array<{ id: string; quantity?: number; uom?: { meta?: { href?: string } & Record<string, unknown> } }>
     attributes?: Array<{ name?: string; value?: unknown }>
@@ -209,6 +213,8 @@ export async function searchProducts(token: string, query: string): Promise<Prod
     pricePerLiter: readPricePerLiter(r.attributes),
     volume: r.volume ?? 0,
     uomId: idFromHref(r.uom?.meta?.href),
+    // assortment rows expose available stock in `stock` (services/variants may lack it)
+    stock: r.stock ?? r.quantity ?? 0,
     packs: (r.packs ?? []).map(p => ({
       id: p.id,
       quantity: p.quantity ?? 1,
@@ -229,6 +235,22 @@ export async function getOrderStates(token: string): Promise<OrderState[]> {
   return (data.states ?? []).map(s => ({ id: s.id, name: s.name, meta: s.meta }))
 }
 
+/**
+ * Contracts (договоры) for the order header. Filtered by counterparty (agent) and,
+ * when given, by legal entity (ownAgent). Returns [] when none match.
+ */
+export async function getContracts(token: string, agentId?: string, orgId?: string): Promise<NamedOption[]> {
+  const filters: string[] = []
+  if (agentId) filters.push(`agent=${MS_API_ROOT}/entity/counterparty/${agentId}`)
+  if (orgId) filters.push(`ownAgent=${MS_API_ROOT}/entity/organization/${orgId}`)
+  const params: Record<string, string> = { limit: '100' }
+  if (filters.length) params.filter = filters.join(';')
+  const data = await get<{ rows?: Array<{ id: string; name: string }> }>(
+    '/entity/contract', params, token
+  ).catch(() => ({ rows: [] as Array<{ id: string; name: string }> }))
+  return (data.rows ?? []).map(c => ({ id: c.id, name: c.name }))
+}
+
 export interface OrderPositionInput {
   assortmentId: string
   assortmentType: string   // 'product' | 'variant' | 'service' | ...
@@ -245,6 +267,7 @@ export interface CreateOrderParams {
   currencyId?: string      // omit → base currency
   rateValue?: number       // base per 1 unit of currencyId
   stateMeta?: Record<string, unknown>  // chosen status meta
+  contractId?: string      // договор (optional)
   positions: OrderPositionInput[]
 }
 
@@ -265,6 +288,7 @@ export async function createCustomerOrder(token: string, p: CreateOrderParams): 
   }
   if (p.storeId) body.store = msRef('store', p.storeId)
   if (p.moment) body.moment = p.moment
+  if (p.contractId) body.contract = msRef('contract', p.contractId)
   if (p.stateMeta) body.state = { meta: p.stateMeta }
   if (p.currencyId) {
     body.rate = p.rateValue != null && p.rateValue > 0

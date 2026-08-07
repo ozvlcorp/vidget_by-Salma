@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { Plus, X, Loader2 } from 'lucide-react'
 import {
   getOrganizations, getStores, searchCounterparties, searchProducts, createCustomerOrder,
-  getCurrencies, getOrderStates, getUoms,
+  getCurrencies, getOrderStates, getUoms, getContracts,
   type NamedOption, type OrganizationOption, type StoreOption, type ProductOption,
   type CurrencyRate, type OrderState,
 } from '../api/moysklad'
@@ -41,6 +41,10 @@ export default function CustomerOrderPage() {
   const [agent, setAgent] = useState<NamedOption | null>(null)
   const [date, setDate] = useState(todayStr())
 
+  // Договор (contract) — depends on the chosen counterparty + legal entity
+  const [contracts, setContracts] = useState<NamedOption[]>([])
+  const [contractId, setContractId] = useState('')
+
   // Currency: доллар (base USD) by default, since the price is per litre in dollars;
   // сум → order in UZS with a rate.
   const [currency, setCurrency] = useState<Cur>('USD')
@@ -77,6 +81,16 @@ export default function CustomerOrderPage() {
       .catch(() => setUomName({}))
   }, [token])
 
+  // Reload contracts whenever the counterparty (or legal entity) changes.
+  useEffect(() => {
+    let alive = true
+    const load = agent ? getContracts(token, agent.id, orgId || undefined) : Promise.resolve([] as NamedOption[])
+    load
+      .then(cs => { if (!alive) return; setContracts(cs); setContractId(prev => (cs.some(c => c.id === prev) ? prev : '')) })
+      .catch(() => { if (alive) { setContracts([]); setContractId('') } })
+    return () => { alive = false }
+  }, [token, agent, orgId])
+
   function freshRow(): Pos {
     return { key: `p-${nextKey.current++}`, product: null, packId: '', quantity: 1, pricePerLiter: 0 }
   }
@@ -106,6 +120,11 @@ export default function CustomerOrderPage() {
   const totalLiters = rows.reduce((s, r) => s + litersOf(r), 0)
   // Base unit label (e.g. шт) for a row's product
   const baseUnitLabel = (r: Pos) => (r.product?.uomId && uomName[r.product.uomId]) || 'шт'
+  // Остаток label for the product dropdown: "25 шт"
+  const stockLabel = (p: ProductOption) => {
+    const unit = (p.uomId && uomName[p.uomId]) || 'шт'
+    return `${p.stock.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ${unit}`
+  }
   const validRows = rows.filter(r => r.product && r.quantity > 0)
   const needsRate = currency === 'UZS'
   const canSubmit = !submitting && !!orgId && !!agent && validRows.length > 0
@@ -125,6 +144,7 @@ export default function CustomerOrderPage() {
         currencyId: currency === 'UZS' ? uzsCurrency?.id : undefined,
         rateValue: currency === 'UZS' ? 1 / rate : undefined,
         stateMeta: state?.meta,
+        contractId: contractId || undefined,
         positions: validRows.map(r => {
           const pack = packOf(r)
           // Цена за базовую единицу (шт) = объём(л за шт) × цена за литр, в валюте заказа
@@ -145,6 +165,7 @@ export default function CustomerOrderPage() {
       // Reset to an empty order
       setRows([freshRow()])
       setAgent(null)
+      setContractId('')
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -181,6 +202,18 @@ export default function CustomerOrderPage() {
           <div className="w-52 rounded-md border border-line bg-surface">
             <SearchCell value={agent} onSelect={setAgent} fetch={searchCounterparties} token={token} placeholder="Выберите контрагента…" />
           </div>
+        </label>
+        <label className="flex items-center gap-1.5 text-xs text-muted">
+          Договор:
+          <select
+            value={contractId}
+            onChange={e => setContractId(e.target.value)}
+            disabled={!agent || contracts.length === 0}
+            className={`${FIELD} max-w-[200px] disabled:opacity-50`}
+          >
+            <option value="">{!agent ? '— выберите контрагента —' : contracts.length === 0 ? '— нет договоров —' : '— не задан —'}</option>
+            {contracts.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
         </label>
         <label className="flex items-center gap-1.5 text-xs text-muted">
           Валюта:
@@ -235,7 +268,14 @@ export default function CustomerOrderPage() {
             <div key={r.key} className="grid border-b border-line bg-surface hover:bg-surface-2/40 transition-colors" style={{ gridTemplateColumns: COLS }}>
               <div className={GUTTER}>{i + 1}</div>
               <div className={CELLBOX}>
-                <SearchCell value={r.product} onSelect={p => pickProduct(r.key, p)} fetch={searchProducts} token={token} placeholder="Выберите товар…" />
+                <SearchCell
+                  value={r.product}
+                  onSelect={p => pickProduct(r.key, p)}
+                  fetch={searchProducts}
+                  token={token}
+                  placeholder="Выберите товар…"
+                  renderMeta={p => `Ост: ${stockLabel(p)}`}
+                />
               </div>
               <div className={CELLBOX}>
                 <select

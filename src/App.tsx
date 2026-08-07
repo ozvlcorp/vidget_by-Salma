@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
-import { AppContext } from './context/AppContext'
+import { Sun, Moon } from 'lucide-react'
+import { AppContext, useAppContext } from './context/AppContext'
 import type { Theme } from './context/AppContext'
 import type { CurrencyRate } from './api/moysklad'
 import { parseLang } from './i18n'
@@ -101,6 +102,7 @@ const SECTIONS: Array<{ id: Section; label: string }> = [
 ]
 
 function Shell() {
+  const { theme, setTheme } = useAppContext()
   const [section, setSection] = useState<Section>('payment')
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-base">
@@ -120,6 +122,16 @@ function Shell() {
             {s.label}
           </button>
         ))}
+        <div className="flex-1" />
+        <button
+          type="button"
+          onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+          title={theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}
+          aria-label="Переключить тему"
+          className="mb-0.5 w-8 h-8 flex items-center justify-center rounded-md text-muted hover:text-fg hover:bg-surface-3 transition-colors"
+        >
+          {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+        </button>
       </nav>
       <div className="flex-1 overflow-hidden">
         {section === 'payment' ? <PaymentWidgetPage /> : <CustomerOrderPage />}
