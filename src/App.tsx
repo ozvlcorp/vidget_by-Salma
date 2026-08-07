@@ -28,14 +28,15 @@ function getInitialTheme(): Theme {
 function App() {
   const rawLang = getUrlParam('lang')
 
-  // Token comes from a URL param (dev/testing) or a per-tab session left by login.
+  // Token comes from a URL param (dev/testing) or a saved login that persists
+  // across browser sessions (localStorage) until the employee logs out.
   const [token, setToken] = useState<string | null>(() => {
     const urlToken = getUrlParam('token')
     if (urlToken) return urlToken
-    try { return sessionStorage.getItem(TOKEN_KEY) } catch { return null }
+    try { return localStorage.getItem(TOKEN_KEY) } catch { return null }
   })
   const [userName, setUserName] = useState<string>(() => {
-    try { return sessionStorage.getItem(USER_KEY) ?? '' } catch { return '' }
+    try { return localStorage.getItem(USER_KEY) ?? '' } catch { return '' }
   })
   const [lang, setLang] = useState<Lang>(parseLang(rawLang))
   const [currencies, setCurrencies] = useState<CurrencyRate[]>([])
@@ -43,8 +44,8 @@ function App() {
 
   function handleLogin(tok: string, name: string) {
     try {
-      sessionStorage.setItem(TOKEN_KEY, tok)
-      sessionStorage.setItem(USER_KEY, name)
+      localStorage.setItem(TOKEN_KEY, tok)
+      localStorage.setItem(USER_KEY, name)
     } catch { /* ignore */ }
     setUserName(name)
     setToken(tok)
@@ -52,8 +53,8 @@ function App() {
 
   function logout() {
     try {
-      sessionStorage.removeItem(TOKEN_KEY)
-      sessionStorage.removeItem(USER_KEY)
+      localStorage.removeItem(TOKEN_KEY)
+      localStorage.removeItem(USER_KEY)
     } catch { /* ignore */ }
     setUserName('')
     setToken(null)
@@ -64,8 +65,8 @@ function App() {
   useEffect(() => {
     const onExpired = () => {
       try {
-        sessionStorage.removeItem(TOKEN_KEY)
-        sessionStorage.removeItem(USER_KEY)
+        localStorage.removeItem(TOKEN_KEY)
+        localStorage.removeItem(USER_KEY)
       } catch { /* ignore */ }
       setUserName('')
       setToken(null)
