@@ -93,8 +93,12 @@ export default function CustomerOrderPage() {
   // Base units per selected unit: pack quantity when a pack is chosen, else 1.
   const packOf = (r: Pos) => r.product?.packs.find(p => p.id === r.packId) ?? null
   const factorOf = (r: Pos) => packOf(r)?.quantity ?? 1
-  const sumOf = (r: Pos) => r.quantity * r.price * factorOf(r)
+  const baseQtyOf = (r: Pos) => r.quantity * factorOf(r)     // всего базовых единиц (шт)
+  const sumOf = (r: Pos) => r.price * baseQtyOf(r)
+  // Литраж позиции: объём из карточки (за 1 шт) × количество в базовых единицах
+  const litersOf = (r: Pos) => (r.product?.volume ?? 0) * baseQtyOf(r)
   const total = rows.reduce((s, r) => s + sumOf(r), 0)
+  const totalLiters = rows.reduce((s, r) => s + litersOf(r), 0)
   // Base unit label (e.g. шт) for a row's product
   const baseUnitLabel = (r: Pos) => (r.product?.uomId && uomName[r.product.uomId]) || 'шт'
   // USD equivalent of the total: доллар → as-is; сум → total / Курс
@@ -213,7 +217,7 @@ export default function CustomerOrderPage() {
             <div className={GUTTER} />
             <HeadCell label="Товар" />
             <HeadCell label="Ед. изм." />
-            <HeadCell label="Объём" className="text-right" />
+            <HeadCell label="Объём, л" className="text-right" />
             <HeadCell label="Количество" className="text-right" />
             <HeadCell label="Цена" className="text-right" />
             <HeadCell label="Сумма" className="text-right" />
@@ -241,7 +245,9 @@ export default function CustomerOrderPage() {
                 </select>
               </div>
               <div className="border-r border-line bg-surface-2/40 flex items-center justify-end px-2.5">
-                <span className="font-mono text-sm text-muted tabular-nums">{r.product ? fmtMoney(r.product.volume) : '—'}</span>
+                <span className="font-mono text-sm text-muted tabular-nums" title={r.product ? `${fmtMoney(r.product.volume)} л за шт` : undefined}>
+                  {r.product ? `${fmtMoney(litersOf(r))} л` : '—'}
+                </span>
               </div>
               <div className={CELLBOX}>
                 <GroupedNumberInput value={r.quantity} onChange={n => patchRow(r.key, { quantity: n })} placeholder="0" className={`${CELL} font-mono text-right`} />
@@ -295,7 +301,7 @@ export default function CustomerOrderPage() {
             <div className={GUTTER} />
             <div className="px-2.5 py-2.5 border-r border-line text-xs uppercase tracking-wide text-muted">Итого</div>
             <div className="border-r border-line" />
-            <div className="border-r border-line" />
+            <div className="px-2.5 py-2.5 border-r border-line text-right font-mono text-sm text-fg tabular-nums">{fmtMoney(totalLiters)} л</div>
             <div className="border-r border-line" />
             <div className="border-r border-line" />
             <div className="px-2.5 py-2.5 border-r border-line text-right font-mono text-sm text-fg tabular-nums">{fmtMoney(total)}</div>
@@ -310,6 +316,7 @@ export default function CustomerOrderPage() {
         <span className="tabular-nums">
           Итого: {fmtMoney(total)} {currency === 'UZS' ? 'сум' : '$'}
           {currency === 'UZS' && rate > 0 && <> · ${fmtMoney(totalUsd)}</>}
+          {' · '}Объём: {fmtMoney(totalLiters)} л
         </span>
         <div className="flex-1" />
         {okMsg && <span className="text-green-600">✓ {okMsg}</span>}
