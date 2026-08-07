@@ -25,8 +25,8 @@ interface Pos {
   pricePerLiter: number // «Цена за литр (доллар)» — из доп. поля товара, редактируемая
 }
 
-// gutter · товар · ед.изм · количество · объём · цена за литр · сумма · удалить
-const COLS = '44px 1.3fr 120px 96px 116px 140px 150px 40px'
+// gutter · товар · ед.изм · остаток · количество · объём · цена за литр · сумма · удалить
+const COLS = '44px 1.3fr 120px 110px 96px 116px 140px 150px 40px'
 
 const FIELD = 'h-8 px-2 rounded-md border border-line bg-surface text-fg text-xs'
 
@@ -63,6 +63,11 @@ export default function CustomerOrderPage() {
   const [error, setError] = useState<string | null>(null)
   const [okMsg, setOkMsg] = useState<string | null>(null)
 
+  // Live handle to rows, so the store-change effect below can read the current
+  // products without re-running on every keystroke.
+  const rowsRef = useRef(rows)
+  useEffect(() => { rowsRef.current = rows }, [rows])
+
   useEffect(() => {
     getOrganizations(token)
       .then(orgs => { setOrganizations(orgs); if (orgs.length) setOrgId(prev => prev || orgs[0].id) })
@@ -90,6 +95,27 @@ export default function CustomerOrderPage() {
       .catch(() => { if (alive) { setContracts([]); setContractId('') } })
     return () => { alive = false }
   }, [token, agent, orgId])
+
+  // When the warehouse changes, re-scope the stock of products already in the
+  // grid to that store (re-uses the product search, which honours the store).
+  useEffect(() => {
+    const products = rowsRef.current.filter(r => r.product).map(r => r.product!)
+    if (products.length === 0) return
+    const uniq = Array.from(new Map(products.map(p => [p.id, p])).values())
+    let alive = true
+    Promise.all(uniq.map(async p => {
+      const found = await searchProducts(token, p.name, storeId || undefined).catch(() => [] as ProductOption[])
+      const match = found.find(x => x.id === p.id)
+      return match ? [p.id, match.stock] as const : null
+    })).then(pairs => {
+      if (!alive) return
+      const map = new Map(pairs.filter((x): x is readonly [string, number] => x !== null))
+      if (map.size === 0) return
+      setRows(rs => rs.map(r => (r.product && map.has(r.product.id)
+        ? { ...r, product: { ...r.product, stock: map.get(r.product.id)! } } : r)))
+    })
+    return () => { alive = false }
+  }, [token, storeId])
 
   function freshRow(): Pos {
     return { key: `p-${nextKey.current++}`, product: null, packId: '', quantity: 1, pricePerLiter: 0 }
@@ -250,12 +276,13 @@ export default function CustomerOrderPage() {
 
       {/* Positions grid */}
       <div className="flex-1 overflow-auto">
-        <div style={{ minWidth: 760 }} className="min-h-full flex flex-col">
+        <div style={{ minWidth: 880 }} className="min-h-full flex flex-col">
           {/* Header */}
           <div className="grid sticky top-0 z-20 bg-surface-2 border-b border-line shadow-sm" style={{ gridTemplateColumns: COLS }}>
             <div className={GUTTER} />
             <HeadCell label="Товар" />
             <HeadCell label="Ед. изм." />
+            <HeadCell label="Остаток" className="text-right" />
             <HeadCell label="Количество" className="text-right" />
             <HeadCell label="Объём, л" className="text-right" />
             <HeadCell label="Цена за литр, $" className="text-right" />
@@ -271,7 +298,7 @@ export default function CustomerOrderPage() {
                 <SearchCell
                   value={r.product}
                   onSelect={p => pickProduct(r.key, p)}
-                  fetch={searchProducts}
+                  fetch={(tok, q) => searchProducts(tok, q, storeId || undefined)}
                   token={token}
                   placeholder="Выберите товар…"
                   hideEmpty
@@ -291,6 +318,11 @@ export default function CustomerOrderPage() {
                     <option key={p.id} value={p.id}>{(p.uomId && uomName[p.uomId]) || 'упаковка'}</option>
                   ))}
                 </select>
+              </div>
+              <div className="border-r border-line bg-surface-2/40 flex items-center justify-end px-2.5">
+                <span className={`font-mono text-sm tabular-nums ${r.product ? (r.product.stock <= 0 ? 'text-red-500 opacity-60' : 'text-muted') : 'text-faint'}`}>
+                  {r.product ? stockLabel(r.product) : '—'}
+                </span>
               </div>
               <div className={CELLBOX}>
                 <GroupedNumberInput value={r.quantity} onChange={n => patchRow(r.key, { quantity: n })} placeholder="0" className={`${CELL} font-mono text-right`} />
@@ -328,13 +360,14 @@ export default function CustomerOrderPage() {
             style={{ gridTemplateColumns: COLS }}
           >
             <div className={GUTTER}><Plus size={13} /></div>
-            <div className="col-span-6 px-2.5 py-2 text-sm text-faint">Добавить товар</div>
+            <div className="col-span-7 px-2.5 py-2 text-sm text-faint">Добавить товар</div>
             <div />
           </button>
 
           {/* Blank canvas */}
           <div className="grid flex-1 bg-surface" style={{ gridTemplateColumns: COLS }} aria-hidden="true">
             <div className={GUTTER} />
+            <div className="border-r border-line" />
             <div className="border-r border-line" />
             <div className="border-r border-line" />
             <div className="border-r border-line" />
@@ -348,6 +381,7 @@ export default function CustomerOrderPage() {
           <div className="grid sticky bottom-0 z-20 bg-surface-2 border-t border-line font-semibold" style={{ gridTemplateColumns: COLS }}>
             <div className={GUTTER} />
             <div className="px-2.5 py-2.5 border-r border-line text-xs uppercase tracking-wide text-muted">Итого</div>
+            <div className="border-r border-line" />
             <div className="border-r border-line" />
             <div className="border-r border-line" />
             <div className="px-2.5 py-2.5 border-r border-line text-right font-mono text-sm text-fg tabular-nums">{fmtMoney(totalLiters)} л</div>

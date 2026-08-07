@@ -227,12 +227,14 @@ export interface ProductOption {
  * Assortment search for order positions. Returns products/variants/services with
  * their volume, base uom, packaging, and the "Цена за литр (доллар)" custom field.
  */
-export async function searchProducts(token: string, query: string): Promise<ProductOption[]> {
+export async function searchProducts(token: string, query: string, storeId?: string): Promise<ProductOption[]> {
   const q = query.trim()
   // No query → no suggestions (the dropdown only opens once the user types).
   if (!q) return []
-  // stockStore=... could scope to one store; without it MoySklad returns aggregate stock.
   const params: Record<string, string> = { search: q, limit: '20' }
+  // Scope the stock/quantity fields to a single store when one is chosen;
+  // without it MoySklad returns aggregate stock across all stores.
+  if (storeId) params.filter = `stockStore=${MS_API_ROOT}/entity/store/${storeId}`
   type Row = {
     id: string; name: string; meta: { type: string }
     salePrices?: Array<{ value: number }>
