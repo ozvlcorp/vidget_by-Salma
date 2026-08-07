@@ -307,7 +307,7 @@ export interface OrderPositionInput {
   assortmentId: string
   assortmentType: string   // 'product' | 'variant' | 'service' | ...
   quantity: number         // in packs when `pack` is set, otherwise in base units
-  priceMajor: number       // price per base unit, in major units (сум)
+  priceMajor: number       // price per unit (per pack when `pack` set), in major units
   pack?: Record<string, unknown>  // упаковка: { id, quantity, uom } — omit for base unit
 }
 
@@ -331,7 +331,10 @@ export async function createCustomerOrder(token: string, p: CreateOrderParams): 
     positions: p.positions.map(pos => {
       const position: Record<string, unknown> = {
         quantity: pos.quantity,
-        price: Math.round(pos.priceMajor * 100),
+        // Цену не округляем сами до целых копеек — передаём как есть (до сотых копейки,
+        // чтобы убрать только шум float). Если у аккаунта включена повышенная точность
+        // цен, МойСклад сохранит дробную часть; иначе округлит на своей стороне.
+        price: Math.round(pos.priceMajor * 100 * 100) / 100,
         assortment: msRef(pos.assortmentType, pos.assortmentId),
       }
       if (pos.pack) position.pack = pos.pack

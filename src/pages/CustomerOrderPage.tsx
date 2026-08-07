@@ -175,16 +175,23 @@ export default function CustomerOrderPage() {
         rateValue: currency === 'UZS' ? 1 / rate : undefined,
         stateMeta: state?.meta,
         contractId: contractId || undefined,
-        positions: validRows.map(r => ({
-          assortmentId: r.product!.id,
-          assortmentType: r.product!.type,
-          // Количество в БАЗОВЫХ единицах (шт): коробки уже разложены в шт.
-          // Так сумма в МойСклад = цена × количество и точно совпадает с виджетом,
-          // без неоднозначностей в расчёте упаковок.
-          quantity: baseQtyOf(r),
-          // Цена за одну базовую единицу (шт) в валюте заказа.
-          priceMajor: unitPriceMajorOf(r),
-        })),
+        positions: validRows.map(r => {
+          const pack = packOf(r)
+          const factor = factorOf(r)   // штук в выбранной единице (коробка = N шт; шт = 1)
+          return {
+            assortmentId: r.product!.id,
+            assortmentType: r.product!.type,
+            // Количество в выбранной единице: в коробках, если выбрана коробка; иначе в штуках.
+            quantity: r.quantity,
+            // Цена за выбранную единицу = цена за штуку × штук в единице (за коробку/за штуку).
+            // Так сумма в МойСклад = цена × количество, а коробки сохраняются.
+            priceMajor: unitPriceMajorOf(r) * factor,
+            // Упаковка: списание остатка идёт в штуках, а в заказе видно коробки.
+            pack: pack
+              ? { id: pack.id, quantity: pack.quantity, ...(pack.uomMeta ? { uom: { meta: pack.uomMeta } } : {}) }
+              : undefined,
+          }
+        }),
       })
       setOkMsg(`Заказ создан${doc.name ? ` № ${doc.name}` : ''}`)
       // Reset to an empty order
