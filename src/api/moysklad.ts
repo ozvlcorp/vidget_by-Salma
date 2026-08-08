@@ -79,7 +79,8 @@ export async function login(username: string, password: string): Promise<string>
   try {
     r = await fetch(`${BASE}/security/token`, {
       method: 'POST',
-      headers: { Authorization: `Basic ${b64(`${username}:${password}`)}`, Accept: 'application/json' },
+      // MoySklad требует Accept строго с charset — иначе 400 «Неверное значение заголовка 'Accept'».
+      headers: { Authorization: `Basic ${b64(`${username}:${password}`)}`, Accept: 'application/json;charset=utf-8' },
     })
   } catch {
     throw new Error('Нет связи с сервером. Проверьте интернет и попробуйте снова.')
