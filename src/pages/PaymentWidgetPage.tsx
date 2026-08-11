@@ -10,7 +10,7 @@ import {
 import { useAppContext } from '../context/AppContext'
 import { ThemeToggle } from '../components/ThemeToggle'
 import { GroupedNumberInput } from '../components/GroupedNumberInput'
-import { CELL, CELLBOX, GUTTER, HeadCell, SearchCell, todayStr, fmtMoney } from '../components/grid'
+import { CELL, CELLBOX, GUTTER, HeadCell, SearchCell, todayStr, fmtMoney, useColumnWidths } from '../components/grid'
 
 // ─── Table model ────────────────────────────────────────────────────────────
 type Cur = 'UZS' | 'USD'   // сум или доллар
@@ -40,7 +40,9 @@ const CURRENCIES: Array<{ value: Cur; label: string }> = [
 
 // Column layout — identical across header, rows and totals so everything lines up.
 // Leading 44px = Excel-style row-number gutter; trailing 40px = delete control.
-const COLS = '44px 142px 1.2fr 92px 130px 88px 124px 1.2fr 166px 40px'
+// Ширины тянутся мышкой за границу в шапке:
+// дата · фирма · валюта · сумма · курс · сумма в $ · контрагенты · тип
+const DEFAULT_COL_WIDTHS = [142, 300, 92, 130, 88, 124, 300, 166]
 
 const fmtUsd = fmtMoney
 
@@ -139,6 +141,12 @@ function FirmCell({
 export default function PaymentWidgetPage() {
   const { token } = useAppContext()
   const nextKey = useRef(1)
+
+  // Ширины столбцов + перетаскивание границ (сохраняются между сессиями)
+  const { widths, startResize, resetWidths } = useColumnWidths('oy-payment-cols', DEFAULT_COL_WIDTHS)
+  // Фирма и Контрагенты тянутся вместе с окном, но не уже заданной ширины
+  const COLS = `44px ${widths[0]}px minmax(${widths[1]}px, 1.2fr) ${widths[2]}px ${widths[3]}px `
+    + `${widths[4]}px ${widths[5]}px minmax(${widths[6]}px, 1.2fr) ${widths[7]}px 40px`
 
   const [rows, setRows] = useState<Row[]>([
     { key: 'row-0', date: todayStr(), firm: '', currency: 'UZS', amount: 0, rate: 0, client: null, type: 'cashin' },
@@ -299,18 +307,18 @@ export default function PaymentWidgetPage() {
 
       {/* Grid — fills the rest of the screen */}
       <div className="flex-1 overflow-auto">
-        <div style={{ minWidth: 1120 }} className="min-h-full flex flex-col">
+        <div style={{ minWidth: widths.reduce((s, w) => s + w, 0) + 84 }} className="min-h-full flex flex-col">
           {/* Header (frozen) */}
           <div className="grid sticky top-0 z-20 bg-surface-2 border-b border-line shadow-sm" style={{ gridTemplateColumns: COLS }}>
             <div className={gutter} />
-            <HeadCell label="Дата" />
-            <HeadCell label="Фирма" />
-            <HeadCell label="Валюта" />
-            <HeadCell label="Сумма" className="text-right" />
-            <HeadCell label="Курс" className="text-right" />
-            <HeadCell label="Сумма в $" className="text-right" />
-            <HeadCell label="Контрагенты" />
-            <HeadCell label="Тип" />
+            <HeadCell label="Дата" onResizeStart={startResize(0)} />
+            <HeadCell label="Фирма" onResizeStart={startResize(1)} />
+            <HeadCell label="Валюта" onResizeStart={startResize(2)} />
+            <HeadCell label="Сумма" className="text-right" onResizeStart={startResize(3)} />
+            <HeadCell label="Курс" className="text-right" onResizeStart={startResize(4)} />
+            <HeadCell label="Сумма в $" className="text-right" onResizeStart={startResize(5)} />
+            <HeadCell label="Контрагенты" onResizeStart={startResize(6)} />
+            <HeadCell label="Тип" onResizeStart={startResize(7)} />
             <div className="border-line" />
           </div>
 
@@ -439,6 +447,14 @@ export default function PaymentWidgetPage() {
       <div className="shrink-0 h-7 flex items-center gap-4 px-3 border-t border-line bg-surface-2 text-[11px] text-faint">
         <span>Строк: {rows.length}</span>
         <span className="tabular-nums">Итого $ {fmtUsd(totalUsd)}</span>
+        <button
+          type="button"
+          onClick={resetWidths}
+          title="Вернуть исходную ширину столбцов"
+          className="text-faint hover:text-accent hover:underline transition-colors"
+        >
+          Сбросить ширину столбцов
+        </button>
         <div className="flex-1" />
         {savedCount > 0 && <span className="text-green-600">✓ Создано документов: {savedCount}</span>}
         {errorCount > 0 && <span className="text-red-600">Ошибок: {errorCount}</span>}

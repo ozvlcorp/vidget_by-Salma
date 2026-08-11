@@ -8,7 +8,7 @@ import {
 } from '../api/moysklad'
 import { useAppContext } from '../context/AppContext'
 import { GroupedNumberInput } from '../components/GroupedNumberInput'
-import { CELL, CELLBOX, GUTTER, HeadCell, SearchCell, todayStr, fmtMoney } from '../components/grid'
+import { CELL, CELLBOX, GUTTER, HeadCell, SearchCell, todayStr, fmtMoney, useColumnWidths } from '../components/grid'
 
 type Cur = 'UZS' | 'USD'
 const CURRENCIES: Array<{ value: Cur; label: string }> = [
@@ -25,14 +25,20 @@ interface Pos {
   pricePerLiter: number // «Цена за литр (доллар)» — из доп. поля товара, редактируемая
 }
 
-// gutter · товар · количество · остаток · ед.изм · объём · цена за литр · сумма · удалить
-const COLS = '44px 1.3fr 104px 110px 132px 116px 140px 150px 40px'
+// Ширины столбцов (тянутся мышкой за границу в шапке):
+// товар · количество · остаток · ед.изм · объём · цена за литр · сумма
+const DEFAULT_COL_WIDTHS = [420, 104, 110, 132, 116, 140, 150]
 
 const FIELD = 'h-8 px-2 rounded-md border border-line bg-surface text-fg text-xs'
 
 export default function CustomerOrderPage() {
   const { token } = useAppContext()
   const nextKey = useRef(1)
+
+  // Ширины столбцов + перетаскивание границ (сохраняются между сессиями)
+  const { widths, startResize, resetWidths } = useColumnWidths('oy-order-cols', DEFAULT_COL_WIDTHS)
+  // Товар тянется вместе с окном, но не уже заданной ширины
+  const COLS = `44px minmax(${widths[0]}px, 1.3fr) ${widths.slice(1).map(w => `${w}px`).join(' ')} 40px`
 
   const [organizations, setOrganizations] = useState<OrganizationOption[] | null>(null)
   const [orgId, setOrgId] = useState('')
@@ -394,17 +400,17 @@ export default function CustomerOrderPage() {
 
       {/* Positions grid */}
       <div className="flex-1 overflow-auto">
-        <div style={{ minWidth: 880 }} className="min-h-full flex flex-col">
+        <div style={{ minWidth: widths.reduce((s, w) => s + w, 0) + 84 }} className="min-h-full flex flex-col">
           {/* Header */}
           <div className="grid sticky top-0 z-20 bg-surface-2 border-b border-line shadow-sm" style={{ gridTemplateColumns: COLS }}>
             <div className={GUTTER} />
-            <HeadCell label="Товар" />
-            <HeadCell label="Количество" className="text-right" />
-            <HeadCell label="Остаток" className="text-right" />
-            <HeadCell label="Ед. изм." />
-            <HeadCell label="Объём, л" className="text-right" />
-            <HeadCell label="Цена за литр, $" className="text-right" />
-            <HeadCell label="Сумма" className="text-right" />
+            <HeadCell label="Товар" onResizeStart={startResize(0)} />
+            <HeadCell label="Количество" className="text-right" onResizeStart={startResize(1)} />
+            <HeadCell label="Остаток" className="text-right" onResizeStart={startResize(2)} />
+            <HeadCell label="Ед. изм." onResizeStart={startResize(3)} />
+            <HeadCell label="Объём, л" className="text-right" onResizeStart={startResize(4)} />
+            <HeadCell label="Цена за литр, $" className="text-right" onResizeStart={startResize(5)} />
+            <HeadCell label="Сумма" className="text-right" onResizeStart={startResize(6)} />
             <div className="border-line" />
           </div>
 
@@ -524,6 +530,14 @@ export default function CustomerOrderPage() {
           {currency === 'UZS' && rate > 0 && <> · ${fmtMoney(totalUsd)}</>}
           {' · '}Объём: {fmtMoney(totalLiters)} л
         </span>
+        <button
+          type="button"
+          onClick={resetWidths}
+          title="Вернуть исходную ширину столбцов"
+          className="text-faint hover:text-accent hover:underline transition-colors"
+        >
+          Сбросить ширину столбцов
+        </button>
         <div className="flex-1" />
         {okMsg && <span className="text-green-600">✓ {okMsg}</span>}
         {error && <span className="text-red-600">Ошибка: {error}</span>}

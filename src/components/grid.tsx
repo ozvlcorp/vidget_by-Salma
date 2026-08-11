@@ -1,6 +1,6 @@
 /* eslint-disable react-refresh/only-export-components -- shared grid helpers + cells live together */
 import { useState, useRef, useEffect } from 'react'
-import type { ChangeEvent } from 'react'
+import type { ChangeEvent, PointerEvent as ReactPointerEvent } from 'react'
 import { createPortal } from 'react-dom'
 import type { NamedOption } from '../api/moysklad'
 
@@ -23,8 +23,90 @@ export function fmtMoney(n: number): string {
   return n.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
-export function HeadCell({ label, className = '' }: { label: string; className?: string }) {
-  return <div className={`px-2.5 py-2.5 text-xs font-bold uppercase tracking-wide text-fg border-r border-line ${className}`}>{label}</div>
+export function HeadCell({
+  label, className = '', onResizeStart,
+}: {
+  label: string
+  className?: string
+  /** When given, renders a drag grip on the cell's right edge to resize the column. */
+  onResizeStart?: (e: ReactPointerEvent<HTMLDivElement>) => void
+}) {
+  return (
+    <div className={`relative px-2.5 py-2.5 text-xs font-bold uppercase tracking-wide text-fg border-r border-line ${className}`}>
+      {label}
+      {onResizeStart && (
+        <div
+          onPointerDown={onResizeStart}
+          onDoubleClick={e => e.stopPropagation()}
+          title="Потяните, чтобы изменить ширину"
+          className="absolute top-0 -right-1 z-30 h-full w-2 cursor-col-resize hover:bg-accent/50 active:bg-accent transition-colors"
+        />
+      )}
+    </div>
+  )
+}
+
+const MIN_COL_WIDTH = 56
+
+/**
+ * Resizable column widths for an Excel-style grid, persisted per grid in
+ * localStorage. Returns the current widths plus a pointer-down handler that
+ * drags column `i`'s right edge.
+ */
+export function useColumnWidths(storageKey: string, initial: number[]) {
+  const [widths, setWidths] = useState<number[]>(() => {
+    try {
+      const saved = localStorage.getItem(storageKey)
+      if (saved) {
+        const arr = JSON.parse(saved) as unknown
+        if (Array.isArray(arr) && arr.length === initial.length && arr.every(n => typeof n === 'number')) {
+          return arr as number[]
+        }
+      }
+    } catch { /* ignore */ }
+    return initial
+  })
+  const drag = useRef<{ index: number; startX: number; startW: number } | null>(null)
+
+  useEffect(() => {
+    try { localStorage.setItem(storageKey, JSON.stringify(widths)) } catch { /* ignore */ }
+  }, [storageKey, widths])
+
+  useEffect(() => {
+    function onMove(e: PointerEvent) {
+      const d = drag.current
+      if (!d) return
+      const next = Math.max(MIN_COL_WIDTH, Math.round(d.startW + (e.clientX - d.startX)))
+      setWidths(ws => ws.map((w, i) => (i === d.index ? next : w)))
+    }
+    function onUp() {
+      if (!drag.current) return
+      drag.current = null
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
+    return () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
+    }
+  }, [])
+
+  function startResize(index: number) {
+    return (e: ReactPointerEvent<HTMLDivElement>) => {
+      e.preventDefault()
+      e.stopPropagation()
+      drag.current = { index, startX: e.clientX, startW: widths[index] }
+      // Keep the resize cursor while dragging anywhere on the page.
+      document.body.style.cursor = 'col-resize'
+      document.body.style.userSelect = 'none'
+    }
+  }
+
+  return { widths, startResize, resetWidths: () => setWidths(initial) }
 }
 
 // ─── Searchable dropdown cell (portal so it never gets clipped by the table) ──
