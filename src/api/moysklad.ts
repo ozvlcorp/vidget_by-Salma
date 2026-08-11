@@ -132,9 +132,25 @@ export async function login(username: string, password: string): Promise<string>
 
 /** Display name of the currently authenticated employee ('' if unavailable). */
 export async function getMyName(token: string): Promise<string> {
-  const data = await get<{ name?: string; fullName?: string }>('/context/employee', {}, token)
-    .catch(() => ({} as { name?: string; fullName?: string }))
-  return data.name || data.fullName || ''
+  return (await getMyContext(token)).name
+}
+
+/** Who is signed in and which MoySklad account they belong to. */
+export async function getMyContext(token: string): Promise<{ name: string; accountId: string }> {
+  type Ctx = { name?: string; fullName?: string; accountId?: string }
+  const data = await get<Ctx>('/context/employee', {}, token).catch(() => ({} as Ctx))
+  return { name: data.name || data.fullName || '', accountId: data.accountId ?? '' }
+}
+
+// Виджет сделан для одного клиента: пускаем только его аккаунт МойСклад.
+// Список можно переопределить переменной сборки VITE_ALLOWED_ACCOUNT_IDS.
+const ALLOWED_ACCOUNTS = ((import.meta.env.VITE_ALLOWED_ACCOUNT_IDS as string | undefined)
+  ?? '9d53a471-8424-11f1-0a80-1b6300015433')
+  .split(',').map(s => s.trim()).filter(Boolean)
+
+/** Разрешён ли этот аккаунт. Пустой список = ограничение отключено. */
+export function isAllowedAccount(accountId: string): boolean {
+  return ALLOWED_ACCOUNTS.length === 0 || ALLOWED_ACCOUNTS.includes(accountId)
 }
 
 // ─── Currencies ───────────────────────────────────────────────────────────────

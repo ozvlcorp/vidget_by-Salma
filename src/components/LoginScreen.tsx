@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Loader2, LogIn } from 'lucide-react'
-import { login, getMyName } from '../api/moysklad'
+import { login, getMyContext, isAllowedAccount } from '../api/moysklad'
 
 /**
  * Login screen: an employee signs in with their own MoySklad login and password.
@@ -19,7 +19,11 @@ export default function LoginScreen({ onLogin }: { onLogin: (token: string, name
     setLoading(true); setError(null)
     try {
       const token = await login(username.trim(), password)
-      const name = await getMyName(token)
+      const { name, accountId } = await getMyContext(token)
+      // Виджет предназначен одному клиенту — чужие аккаунты МойСклад не пускаем.
+      if (!isAllowedAccount(accountId)) {
+        throw new Error('Этот аккаунт МойСклад не имеет доступа к виджету')
+      }
       onLogin(token, name)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
