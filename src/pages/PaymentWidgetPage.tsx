@@ -205,6 +205,15 @@ export default function PaymentWidgetPage() {
   const validRows = rows.filter(r => r.client && r.amount > 0 && (r.currency === 'USD' || r.rate > 0))
   const needsUzs = validRows.some(r => r.currency === 'UZS')
   const canSubmit = !submitting && !!orgId && validRows.length > 0 && (!needsUzs || allCurrencies.length > 0)
+  // Почему кнопка неактивна — показываем рядом с ней. Самая частая причина:
+  // контрагент напечатан, но не выбран из списка, поэтому строка не считается готовой.
+  const missingClient = rows.some(r => !r.client && (r.amount > 0 || r.firm.trim()))
+  const missingRate = rows.some(r => r.client && r.amount > 0 && r.currency === 'UZS' && r.rate <= 0)
+  const submitBlocker = !orgId ? 'Выберите юр. лицо'
+    : missingClient ? 'Выберите контрагента из списка'
+    : missingRate ? 'Укажите курс для строк в сумах'
+    : validRows.length === 0 ? 'Заполните строку: контрагент и сумма'
+    : null
 
   function freshRow(): Row {
     return { key: `row-${nextKey.current++}`, date: todayStr(), firm: '', currency: 'UZS', amount: 0, rate: 0, client: null, type: 'cashin' }
@@ -292,10 +301,15 @@ export default function PaymentWidgetPage() {
         >
           <Plus size={14} /> Строка
         </button>
+        {/* Кнопка неактивна — сразу говорим, чего не хватает. */}
+        {!submitting && submitBlocker && (
+          <span className="text-xs text-amber-600">{submitBlocker}</span>
+        )}
         <button
           type="button"
           onClick={handleSubmit}
           disabled={!canSubmit}
+          title={submitBlocker ?? 'Создать документы в МойСклад'}
           className="flex items-center gap-1.5 h-8 px-4 rounded-md bg-accent text-white text-xs font-semibold hover:bg-accent-strong transition-all disabled:opacity-40"
         >
           {submitting && <Loader2 size={13} className="animate-spin" />}

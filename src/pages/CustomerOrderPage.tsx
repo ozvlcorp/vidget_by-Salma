@@ -214,6 +214,14 @@ export default function CustomerOrderPage() {
   const needsRate = currency === 'UZS'
   const canSubmit = !submitting && !!orgId && !!agent && validRows.length > 0
     && (!needsRate || rate > 0)
+  // Почему кнопка неактивна — показываем рядом с ней.
+  const submitBlocker = !orgId ? 'Выберите юр. лицо'
+    : !agent ? 'Выберите контрагента из списка'
+    : validRows.length === 0 ? 'Добавьте товар и количество'
+    : needsRate && rate <= 0 ? 'Укажите курс'
+    : null
+  // Подпись валюты для итоговых сумм: цена всегда в долларах, а сумма — в валюте заказа.
+  const sumCurLabel = currency === 'UZS' ? 'сум' : '$'
 
   async function handleSubmit() {
     if (!agent) return
@@ -384,10 +392,16 @@ export default function CustomerOrderPage() {
           </span>
         </label>
         <div className="flex-1" />
+        {/* Кнопка неактивна — сразу говорим, чего не хватает, иначе нажатие
+            выглядит как «ничего не произошло». */}
+        {!submitting && submitBlocker && (
+          <span className="text-xs text-amber-600">{submitBlocker}</span>
+        )}
         <button
           type="button"
           onClick={handleSubmit}
           disabled={!canSubmit}
+          title={submitBlocker ?? 'Создать заказ в МойСклад'}
           className="flex items-center gap-1.5 h-8 px-4 rounded-md bg-accent text-white text-xs font-semibold hover:bg-accent-strong transition-all disabled:opacity-40"
         >
           {submitting && <Loader2 size={13} className="animate-spin" />}
@@ -407,7 +421,7 @@ export default function CustomerOrderPage() {
             <HeadCell label="Ед. изм." onResizeStart={startResize(3)} />
             <HeadCell label="Объём, л" className="text-right" onResizeStart={startResize(4)} />
             <HeadCell label="Цена за литр, $" className="text-right" onResizeStart={startResize(5)} />
-            <HeadCell label="Сумма" className="text-right" onResizeStart={startResize(6)} />
+            <HeadCell label={`Сумма, ${sumCurLabel}`} className="text-right" onResizeStart={startResize(6)} />
             <div className="border-line" />
           </div>
 
