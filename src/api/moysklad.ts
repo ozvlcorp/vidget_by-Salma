@@ -174,6 +174,39 @@ export async function getCurrencies(token: string): Promise<CurrencyRate[]> {
   })
 }
 
+/** Валюты, между которыми переключается пользователь. */
+export type WidgetCurrency = 'UZS' | 'USD'
+
+/** Валюта учёта аккаунта (может быть и сум, и доллар — зависит от настройки). */
+export function baseCurrencyOf(currencies: CurrencyRate[]): CurrencyRate | null {
+  return currencies.find(c => c.isDefault) ?? null
+}
+
+/**
+ * Что положить в блок `rate` документа для выбранной валюты.
+ *
+ * МойСклад ведёт документ в валюте учёта, пока не указана другая, и отклоняет
+ * курс, заданный для самой валюты учёта. Какая из сум/доллар является валютой
+ * учёта — зависит от аккаунта, поэтому определяем это по справочнику, а не
+ * предполагаем заранее.
+ *
+ * @param uzsPerUsd курс, введённый пользователем (сум за 1 доллар); 0 — не задан
+ */
+export function resolveDocCurrency(
+  currencies: CurrencyRate[], picked: WidgetCurrency, uzsPerUsd: number,
+): { currencyId?: string; rateValue?: number } {
+  const base = baseCurrencyOf(currencies)
+  const target = currencies.find(c => c.isoCode === picked) ?? null
+  // Документ в валюте учёта → блок валюты/курса не нужен вовсе.
+  if (!target || base?.isoCode === picked) return {}
+  // rate.value = единиц валюты учёта за 1 единицу валюты документа.
+  let rateValue: number | undefined
+  if (base?.isoCode === 'UZS' && picked === 'USD') rateValue = uzsPerUsd > 0 ? uzsPerUsd : undefined
+  else if (base?.isoCode === 'USD' && picked === 'UZS') rateValue = uzsPerUsd > 0 ? 1 / uzsPerUsd : undefined
+  // Курса от пользователя нет — пусть МойСклад подставит свой текущий курс.
+  return { currencyId: target.id, ...(rateValue ? { rateValue } : {}) }
+}
+
 // ─── Payment split widget: legal entities, counterparty search, document creation ──
 
 function msRef(type: string, id: string) {

@@ -11,7 +11,7 @@ const SECRET_KEY = process.env.MS_SECRET_KEY || ''    // secret from the develop
 const VENDOR_API = process.env.MS_VENDOR_API || 'https://apps-api.moysklad.ru/api/vendor/1.0'
 const MS_API = process.env.MS_API || 'https://api.moysklad.ru/api/remap/1.2'
 const STORE_PATH = process.env.MS_STORE_PATH || '/data/accounts.json'
-const SESSION_TTL = Number(process.env.MS_SESSION_TTL || 12 * 60 * 60)  // seconds
+const SESSION_TTL = Number(process.env.MS_SESSION_TTL || 24 * 60 * 60)  // seconds
 
 if (!APP_UID || !APP_ID || !SECRET_KEY) {
   console.warn('[config] MS_APP_UID / MS_APP_ID / MS_SECRET_KEY are not set — the app cannot be installed yet')

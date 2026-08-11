@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom'
 import { Plus, X, Loader2 } from 'lucide-react'
 import {
   searchCounterparties, getOrganizations, createPaymentDocument, getCurrencies,
-  getDocAttributes, buildFromWhomAttribute, searchFromWhomValues, msMoment,
+  getDocAttributes, buildFromWhomAttribute, searchFromWhomValues, msMoment, resolveDocCurrency,
   type NamedOption, type OrganizationOption, type PaymentDocType, type CurrencyRate, type DocAttribute,
 } from '../api/moysklad'
 import { useAppContext } from '../context/AppContext'
@@ -154,9 +154,9 @@ export default function PaymentWidgetPage() {
 
   const [organizations, setOrganizations] = useState<OrganizationOption[] | null>(null)
   const [orgId, setOrgId] = useState('')
-  // The сум (UZS) currency — documents are created in сум with a conversion rate,
-  // because the MoySklad accounting currency is USD.
-  const [uzsCurrency, setUzsCurrency] = useState<CurrencyRate | null>(null)
+  // Весь справочник валют: валюта учёта аккаунта может быть и сум, и доллар,
+  // от неё зависит, нужно ли вообще указывать валюту и курс в документе.
+  const [allCurrencies, setAllCurrencies] = useState<CurrencyRate[]>([])
   // The "От кого" доп. поле per document type (its id differs between cashin/paymentin)
   const [fromWhomAttrs, setFromWhomAttrs] = useState<Record<PaymentDocType, DocAttribute | null>>({ cashin: null, paymentin: null })
   const [submitting, setSubmitting] = useState(false)
@@ -171,8 +171,8 @@ export default function PaymentWidgetPage() {
       })
       .catch(() => setOrganizations([]))
     getCurrencies(token)
-      .then(cs => setUzsCurrency(cs.find(c => c.isoCode === 'UZS') ?? null))
-      .catch(() => setUzsCurrency(null))
+      .then(setAllCurrencies)
+      .catch(() => setAllCurrencies([]))
     for (const t of ['cashin', 'paymentin'] as PaymentDocType[]) {
       getDocAttributes(token, t)
         .then(attrs => {
@@ -204,14 +204,14 @@ export default function PaymentWidgetPage() {
   // for сум — a positive conversion rate (доллар is the base currency, no rate).
   const validRows = rows.filter(r => r.client && r.amount > 0 && (r.currency === 'USD' || r.rate > 0))
   const needsUzs = validRows.some(r => r.currency === 'UZS')
-  const canSubmit = !submitting && !!orgId && validRows.length > 0 && (!needsUzs || !!uzsCurrency)
+  const canSubmit = !submitting && !!orgId && validRows.length > 0 && (!needsUzs || allCurrencies.length > 0)
 
   function freshRow(): Row {
     return { key: `row-${nextKey.current++}`, date: todayStr(), firm: '', currency: 'UZS', amount: 0, rate: 0, client: null, type: 'cashin' }
   }
 
   async function handleSubmit() {
-    if (needsUzs && !uzsCurrency) return
+    if (needsUzs && allCurrencies.length === 0) return
     setSubmitting(true)
     setResults({})
     setSavedCount(0)
@@ -233,9 +233,9 @@ export default function PaymentWidgetPage() {
           organizationId: orgId,
           agentId: row.client!.id,
           sumMajor: row.amount,
-          // сум → document currency = сум with rate 1/Курс; доллар → base currency (no rate)
-          currencyId: row.currency === 'UZS' ? uzsCurrency!.id : undefined,
-          rateValue: row.currency === 'UZS' ? 1 / row.rate : undefined,
+          // Валюта и курс зависят от валюты учёта аккаунта: если валюта строки
+          // и есть валюта учёта, блок валюты не отправляем вовсе.
+          ...resolveDocCurrency(allCurrencies, row.currency, row.rate),
           attributes,
           moment: msMoment(row.date),
         })
@@ -459,7 +459,7 @@ export default function PaymentWidgetPage() {
         {savedCount > 0 && <span className="text-green-600">✓ Создано документов: {savedCount}</span>}
         {errorCount > 0 && <span className="text-red-600">Ошибок: {errorCount}</span>}
         {savedCount === 0 && errorCount === 0 && (
-          <span>{uzsCurrency ? 'Готово к отправке в МойСклад' : 'Валюта «сум» не найдена в справочнике'}</span>
+          <span>{allCurrencies.length > 0 ? 'Готово к отправке в МойСклад' : 'Справочник валют не загружен'}</span>
         )}
       </div>
     </div>

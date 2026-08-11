@@ -3,6 +3,7 @@ import { Plus, X, Loader2, Check } from 'lucide-react'
 import {
   getOrganizations, getStores, searchCounterparties, searchProducts, createCustomerOrder,
   getCurrencies, getOrderStates, getUoms, getContracts, createContract, getAllContractNames, msMoment,
+  resolveDocCurrency,
   type NamedOption, type OrganizationOption, type StoreOption, type ProductOption,
   type CurrencyRate, type OrderState,
 } from '../api/moysklad'
@@ -65,7 +66,8 @@ export default function CustomerOrderPage() {
   // сум → order in UZS with a rate.
   const [currency, setCurrency] = useState<Cur>('USD')
   const [rate, setRate] = useState(0)
-  const [uzsCurrency, setUzsCurrency] = useState<CurrencyRate | null>(null)
+  // Весь справочник валют: по нему определяется валюта учёта аккаунта.
+  const [allCurrencies, setAllCurrencies] = useState<CurrencyRate[]>([])
 
   // Status (Статус)
   const [states, setStates] = useState<OrderState[]>([])
@@ -92,8 +94,8 @@ export default function CustomerOrderPage() {
       .then(ss => { setStores(ss); if (ss.length) setStoreId(prev => prev || ss[0].id) })
       .catch(() => setStores([]))
     getCurrencies(token)
-      .then(cs => setUzsCurrency(cs.find(c => c.isoCode === 'UZS') ?? null))
-      .catch(() => setUzsCurrency(null))
+      .then(setAllCurrencies)
+      .catch(() => setAllCurrencies([]))
     getOrderStates(token)
       .then(setStates)
       .catch(() => setStates([]))
@@ -208,9 +210,10 @@ export default function CustomerOrderPage() {
     return `${p.stock.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ${unit}`
   }
   const validRows = rows.filter(r => r.product && r.quantity > 0)
+  // Цена за литр задана в долларах, поэтому для документа в сумах курс обязателен.
   const needsRate = currency === 'UZS'
   const canSubmit = !submitting && !!orgId && !!agent && validRows.length > 0
-    && (!needsRate || (!!uzsCurrency && rate > 0))
+    && (!needsRate || rate > 0)
 
   async function handleSubmit() {
     if (!agent) return
@@ -222,9 +225,9 @@ export default function CustomerOrderPage() {
         agentId: agent.id,
         storeId: storeId || undefined,
         moment: msMoment(date),
-        // сум → document currency = сум with rate 1/Курс; доллар → base currency
-        currencyId: currency === 'UZS' ? uzsCurrency?.id : undefined,
-        rateValue: currency === 'UZS' ? 1 / rate : undefined,
+        // Валюта документа и курс зависят от валюты учёта аккаунта:
+        // если выбранная валюта и есть валюта учёта — блок валюты не отправляем.
+        ...resolveDocCurrency(allCurrencies, currency, rate),
         stateMeta: state?.meta,
         contractId: contractId || undefined,
         positions: validRows.map(r => ({
