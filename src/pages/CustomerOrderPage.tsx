@@ -35,10 +35,11 @@ export default function CustomerOrderPage() {
   const { token } = useAppContext()
   const nextKey = useRef(1)
 
-  // Ширины столбцов + перетаскивание границ (сохраняются между сессиями)
+  // Ширины столбцов + перетаскивание границ (сохраняются между сессиями).
+  // Все столбцы фиксированные — тогда «Товар» тянется ровно так, как задал
+  // пользователь; свободное место справа забирает пустая колонка в конце.
   const { widths, startResize, resetWidths } = useColumnWidths('oy-order-cols', DEFAULT_COL_WIDTHS)
-  // Товар тянется вместе с окном, но не уже заданной ширины
-  const COLS = `44px minmax(${widths[0]}px, 1.3fr) ${widths.slice(1).map(w => `${w}px`).join(' ')} 40px`
+  const COLS = `44px ${widths.map(w => `${w}px`).join(' ')} 40px minmax(0, 1fr)`
 
   const [organizations, setOrganizations] = useState<OrganizationOption[] | null>(null)
   const [orgId, setOrgId] = useState('')
@@ -226,23 +227,16 @@ export default function CustomerOrderPage() {
         rateValue: currency === 'UZS' ? 1 / rate : undefined,
         stateMeta: state?.meta,
         contractId: contractId || undefined,
-        positions: validRows.map(r => {
-          const pack = packOf(r)
-          const factor = factorOf(r)   // штук в выбранной единице (коробка = N шт; шт = 1)
-          return {
-            assortmentId: r.product!.id,
-            assortmentType: r.product!.type,
-            // Количество в выбранной единице: в коробках, если выбрана коробка; иначе в штуках.
-            quantity: r.quantity,
-            // Цена за выбранную единицу = цена за штуку × штук в единице (за коробку/за штуку).
-            // Так сумма в МойСклад = цена × количество, а коробки сохраняются.
-            priceMajor: unitPriceMajorOf(r) * factor,
-            // Упаковка: списание остатка идёт в штуках, а в заказе видно коробки.
-            pack: pack
-              ? { id: pack.id, quantity: pack.quantity, ...(pack.uomMeta ? { uom: { meta: pack.uomMeta } } : {}) }
-              : undefined,
-          }
-        }),
+        positions: validRows.map(r => ({
+          assortmentId: r.product!.id,
+          assortmentType: r.product!.type,
+          // Количество в ШТУКАХ: коробки разложены по размеру упаковки из карточки
+          // (10 коробок × 8 шт = 80 шт). МойСклад трактует quantity как базовые
+          // единицы и не домножает на упаковку, поэтому пересчитываем сами.
+          quantity: baseQtyOf(r),
+          // Цена за одну штуку → сумма в МойСклад = цена × количество.
+          priceMajor: unitPriceMajorOf(r),
+        })),
       })
       const msg = `Заказ создан${doc.name ? ` № ${doc.name}` : ''}`
       setOkMsg(msg)

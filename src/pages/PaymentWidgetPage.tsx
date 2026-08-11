@@ -142,11 +142,11 @@ export default function PaymentWidgetPage() {
   const { token } = useAppContext()
   const nextKey = useRef(1)
 
-  // Ширины столбцов + перетаскивание границ (сохраняются между сессиями)
+  // Ширины столбцов + перетаскивание границ (сохраняются между сессиями).
+  // Все столбцы фиксированные — тогда любая колонка тянется ровно так, как задал
+  // пользователь; свободное место справа забирает пустая колонка в конце.
   const { widths, startResize, resetWidths } = useColumnWidths('oy-payment-cols', DEFAULT_COL_WIDTHS)
-  // Фирма и Контрагенты тянутся вместе с окном, но не уже заданной ширины
-  const COLS = `44px ${widths[0]}px minmax(${widths[1]}px, 1.2fr) ${widths[2]}px ${widths[3]}px `
-    + `${widths[4]}px ${widths[5]}px minmax(${widths[6]}px, 1.2fr) ${widths[7]}px 40px`
+  const COLS = `44px ${widths.map(w => `${w}px`).join(' ')} 40px minmax(0, 1fr)`
 
   const [rows, setRows] = useState<Row[]>([
     { key: 'row-0', date: todayStr(), firm: '', currency: 'UZS', amount: 0, rate: 0, client: null, type: 'cashin' },
