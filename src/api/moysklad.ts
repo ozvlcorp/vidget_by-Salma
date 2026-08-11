@@ -1,5 +1,12 @@
-// Requests go to /api/moysklad/* — proxied by Vite (dev) or nginx (prod)
-const BASE = '/api/moysklad'
+// Requests go to /api/moysklad/* — proxied by Vite (dev) or nginx (prod).
+// When the widget runs as an installed MoySklad solution this is repointed at the
+// vendor backend, which swaps our session token for the account's real one.
+let BASE = '/api/moysklad'
+
+/** Routes all further API calls through the given base (e.g. the vendor backend). */
+export function setApiBase(url: string) {
+  BASE = url.replace(/\/+$/, '')
+}
 // meta.href values inside request bodies must point at the real MoySklad API
 // (the platform resolves entity refs from this URL) — independent of the proxy path above.
 const MS_API_ROOT = 'https://api.moysklad.ru/api/remap/1.2'

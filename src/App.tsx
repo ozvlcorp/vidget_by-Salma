@@ -3,6 +3,7 @@ import { Sun, Moon, LogOut } from 'lucide-react'
 import { AppContext, useAppContext } from './context/AppContext'
 import type { Theme } from './context/AppContext'
 import type { CurrencyRate } from './api/moysklad'
+import { setApiBase } from './api/moysklad'
 import { parseLang } from './i18n'
 import type { Lang } from './i18n'
 import PaymentWidgetPage from './pages/PaymentWidgetPage'
@@ -11,6 +12,9 @@ import LoginScreen from './components/LoginScreen'
 
 const TOKEN_KEY = 'oy-ms-token'
 const USER_KEY = 'oy-ms-user'
+// Vendor backend of the installed MoySklad solution (see backend/).
+const BACKEND_URL = (import.meta.env.VITE_BACKEND_URL as string | undefined)
+  ?? 'https://widget-backend.oymoysklad.com'
 
 function getUrlParam(key: string): string | null {
   const url = new URL(window.location.href)
@@ -41,6 +45,28 @@ function App() {
   const [lang, setLang] = useState<Lang>(parseLang(rawLang))
   const [currencies, setCurrencies] = useState<CurrencyRate[]>([])
   const [theme, setThemeState] = useState<Theme>(getInitialTheme)
+  // Opened inside MoySklad as an installed solution: it passes ?contextKey=…,
+  // which the backend exchanges for a session — the employee signs in to nothing.
+  const [booting, setBooting] = useState<boolean>(() => !!getUrlParam('contextKey'))
+
+  useEffect(() => {
+    const contextKey = getUrlParam('contextKey')
+    if (!contextKey) return
+    let alive = true
+    fetch(`${BACKEND_URL}/widget/session?contextKey=${encodeURIComponent(contextKey)}`)
+      .then(r => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((d: { session?: string; name?: string }) => {
+        if (!alive || !d.session) return
+        // From here every API call goes through the backend, which holds the
+        // account's real token — it never reaches the browser.
+        setApiBase(`${BACKEND_URL}/api/moysklad`)
+        setUserName(d.name ?? '')
+        setToken(d.session)
+      })
+      .catch(() => { /* fall back to the login screen below */ })
+      .finally(() => { if (alive) setBooting(false) })
+    return () => { alive = false }
+  }, [])
 
   function handleLogin(tok: string, name: string) {
     try {
@@ -84,6 +110,15 @@ function App() {
     try { localStorage.setItem('oy-theme', t) } catch { /* ignore */ }
   }
 
+  if (booting) {
+    return (
+      <div className="fabric-bg min-h-screen flex items-center justify-center">
+        <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+      </div>
+    )
+  }
+  // Outside MoySklad (or if the app session could not be established) the widget
+  // still works with a personal login.
   if (!token) return <LoginScreen onLogin={handleLogin} />
 
   return (

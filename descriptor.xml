@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Дескриптор приватного решения для МойСклад.
+
+  Перед загрузкой в кабинет разработчика заменить:
+    • <endpointBase> — адрес бэкенда (backend/), на него МойСклад шлёт установку/удаление
+    • <iframe sourceUrl> — адрес самого виджета
+
+  Оба адреса обязаны быть HTTPS.
+-->
+<ServerApplication xmlns="https://apps-api.moysklad.ru/xml/ns/appstore/app/v2"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="https://apps-api.moysklad.ru/xml/ns/appstore/app/v2
+                    https://apps-api.moysklad.ru/xml/ns/appstore/app/v2/application-v2.xsd">
+
+  <!-- Куда МойСклад шлёт события установки/удаления решения.
+       К этому адресу он сам добавит /api/moysklad/vendor/1.0/apps/{appId}/{accountId} -->
+  <vendorApi>
+    <endpointBase>https://widget-backend.oymoysklad.com</endpointBase>
+  </vendorApi>
+
+  <!-- Доступ к JSON API 1.2 от имени администратора: решение создаёт
+       приходные ордера, входящие платежи и заказы покупателей. -->
+  <access>
+    <resource>https://api.moysklad.ru/api/remap/1.2</resource>
+    <scope>admin</scope>
+  </access>
+
+  <!-- Виджет открывается как отдельный раздел внутри МойСклад. -->
+  <iframes>
+    <iframe type="main" sourceUrl="https://salma.oymoysklad.com/"/>
+  </iframes>
+
+</ServerApplication>
