@@ -16,10 +16,10 @@ function groupDigits(digits: string): string {
   return digits.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')
 }
 
-function formatDisplay(clean: string): string {
+function formatDisplay(clean: string, sep = '.'): string {
   const [intPart, decPart] = clean.split('.')
   const grouped = groupDigits(intPart || '')
-  return decPart !== undefined ? `${grouped}.${decPart}` : grouped
+  return decPart !== undefined ? `${grouped}${sep}${decPart}` : grouped
 }
 
 function parseAmount(raw: string): number {
@@ -29,7 +29,7 @@ function parseAmount(raw: string): number {
 
 /** Thousand-grouped numeric text input (e.g. "30 000 000") that reports a plain number via onChange. */
 export function GroupedNumberInput({
-  value, onChange, placeholder, className = '', autoFocus, disabled,
+  value, onChange, placeholder, className = '', autoFocus, disabled, decimalComma,
 }: {
   value: number
   onChange: (n: number) => void
@@ -37,10 +37,15 @@ export function GroupedNumberInput({
   className?: string
   autoFocus?: boolean
   disabled?: boolean
+  /** Show the decimal separator as a comma (typing "." or "," both produce ","). */
+  decimalComma?: boolean
 }) {
-  const [text, setText] = useState<string>(value ? formatDisplay(String(value)) : '')
+  const sep = decimalComma ? ',' : '.'
+  const [text, setText] = useState<string>(value ? formatDisplay(String(value), sep) : '')
   const inputRef = useRef<HTMLInputElement>(null)
   const pendingCaretDigits = useRef<number | null>(null)
+  // Whether the decimal separator sat before the caret in the text the user just typed.
+  const pendingCaretSep = useRef(false)
   // Tracks the numeric value this input last emitted, so a genuine external
   // change (e.g. a programmatic pre-fill) resyncs the text, while the echo of
   // our own onChange does not fight the user's typing.
@@ -49,9 +54,9 @@ export function GroupedNumberInput({
   useEffect(() => {
     if (value !== lastEmitted.current) {
       lastEmitted.current = value
-      setText(value ? formatDisplay(String(value)) : '')
+      setText(value ? formatDisplay(String(value), sep) : '')
     }
-  }, [value])
+  }, [value, sep])
 
   useLayoutEffect(() => {
     const target = pendingCaretDigits.current
@@ -63,9 +68,14 @@ export function GroupedNumberInput({
       if (count >= target) break
       if (el.value[pos] >= '0' && el.value[pos] <= '9') count++
     }
+    // The caret lands right after the Nth digit — but if the user had already
+    // typed the decimal separator before the caret, step past it so the next
+    // keystroke goes into the decimal part instead of in front of it.
+    if (pendingCaretSep.current && el.value[pos] === sep) pos++
     el.setSelectionRange(pos, pos)
     pendingCaretDigits.current = null
-  }, [text])
+    pendingCaretSep.current = false
+  }, [text, sep])
 
   function handleChange(e: ChangeEvent<HTMLInputElement>) {
     const el = e.target
@@ -74,7 +84,8 @@ export function GroupedNumberInput({
 
     const clean = sanitize(el.value)
     pendingCaretDigits.current = digitsBefore
-    setText(formatDisplay(clean))
+    pendingCaretSep.current = /[.,]/.test(el.value.slice(0, caret))
+    setText(formatDisplay(clean, sep))
     const n = parseAmount(clean)
     lastEmitted.current = n
     onChange(n)

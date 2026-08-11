@@ -278,14 +278,30 @@ export async function searchProducts(token: string, query: string, storeId?: str
 }
 
 /** A configurable order state (Статус) from the customerorder metadata. */
-export interface OrderState { id: string; name: string; meta: Record<string, unknown> }
+export interface OrderState {
+  id: string
+  name: string
+  meta: Record<string, unknown>
+  /** CSS colour of the status, same as shown in MoySklad (e.g. "#4caf50"). */
+  color: string
+}
 
-/** Available statuses (состояния) for a customer order. */
+/**
+ * MoySklad stores a state's colour as a signed 32-bit integer (0xAARRGGBB).
+ * Keep the low 24 bits (RGB) and render as CSS hex.
+ */
+function stateColor(raw?: number): string {
+  if (typeof raw !== 'number' || !isFinite(raw)) return '#9e9e9e'
+  const rgb = (raw >>> 0) & 0xffffff
+  return `#${rgb.toString(16).padStart(6, '0')}`
+}
+
+/** Available statuses (состояния) for a customer order, with their MoySklad colours. */
 export async function getOrderStates(token: string): Promise<OrderState[]> {
-  const data = await get<{ states?: Array<{ id: string; name: string; meta: Record<string, unknown> }> }>(
-    '/entity/customerorder/metadata', {}, token
-  ).catch(() => ({ states: [] as Array<{ id: string; name: string; meta: Record<string, unknown> }> }))
-  return (data.states ?? []).map(s => ({ id: s.id, name: s.name, meta: s.meta }))
+  type S = { id: string; name: string; meta: Record<string, unknown>; color?: number }
+  const data = await get<{ states?: S[] }>('/entity/customerorder/metadata', {}, token)
+    .catch(() => ({ states: [] as S[] }))
+  return (data.states ?? []).map(s => ({ id: s.id, name: s.name, meta: s.meta, color: stateColor(s.color) }))
 }
 
 /**
@@ -302,6 +318,48 @@ export async function getContracts(token: string, agentId?: string, orgId?: stri
     '/entity/contract', params, token
   ).catch(() => ({ rows: [] as Array<{ id: string; name: string }> }))
   return (data.rows ?? []).map(c => ({ id: c.id, name: c.name }))
+}
+
+/**
+ * All contract numbers already in MoySklad (across counterparties) — used to warn
+ * about a duplicate number before creating a new contract.
+ */
+export async function getAllContractNames(token: string): Promise<string[]> {
+  const data = await get<{ rows?: Array<{ name: string }> }>('/entity/contract', { limit: '1000' }, token)
+    .catch(() => ({ rows: [] as Array<{ name: string }> }))
+  return (data.rows ?? []).map(c => c.name)
+}
+
+/** Creates a contract (договор) for a counterparty + legal entity. */
+export async function createContract(
+  token: string, p: { name: string; agentId: string; orgId: string }
+): Promise<NamedOption> {
+  const body = {
+    name: p.name,
+    agent: msRef('counterparty', p.agentId),
+    ownAgent: msRef('organization', p.orgId),
+    contractType: 'Sales',
+  }
+  const r = await msFetch(`${BASE}/entity/contract`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/json;charset=utf-8',
+    },
+    body: JSON.stringify(body),
+  })
+  if (!r.ok) {
+    const text = await r.text().catch(() => '')
+    let msg = `HTTP ${r.status}`
+    try {
+      const parsed = JSON.parse(text) as { errors?: Array<{ error?: string }> }
+      if (parsed?.errors?.[0]?.error) msg = parsed.errors[0].error!
+    } catch { /* not JSON */ }
+    throw new Error(msg)
+  }
+  const data = await r.json() as { id: string; name: string }
+  return { id: data.id, name: data.name }
 }
 
 export interface OrderPositionInput {

@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect } from 'react'
-import { Plus, X, Loader2 } from 'lucide-react'
+import { Plus, X, Loader2, Check } from 'lucide-react'
 import {
   getOrganizations, getStores, searchCounterparties, searchProducts, createCustomerOrder,
-  getCurrencies, getOrderStates, getUoms, getContracts,
+  getCurrencies, getOrderStates, getUoms, getContracts, createContract, getAllContractNames,
   type NamedOption, type OrganizationOption, type StoreOption, type ProductOption,
   type CurrencyRate, type OrderState,
 } from '../api/moysklad'
@@ -25,8 +25,8 @@ interface Pos {
   pricePerLiter: number // «Цена за литр (доллар)» — из доп. поля товара, редактируемая
 }
 
-// gutter · товар · ед.изм · остаток · количество · объём · цена за литр · сумма · удалить
-const COLS = '44px 1.3fr 120px 110px 96px 116px 140px 150px 40px'
+// gutter · товар · количество · остаток · ед.изм · объём · цена за литр · сумма · удалить
+const COLS = '44px 1.3fr 104px 110px 132px 116px 140px 150px 40px'
 
 const FIELD = 'h-8 px-2 rounded-md border border-line bg-surface text-fg text-xs'
 
@@ -44,6 +44,15 @@ export default function CustomerOrderPage() {
   // Договор (contract) — depends on the chosen counterparty + legal entity
   const [contracts, setContracts] = useState<NamedOption[]>([])
   const [contractId, setContractId] = useState('')
+  // Создание нового договора прямо из виджета
+  const [newContract, setNewContract] = useState<string | null>(null)  // null = форма закрыта
+  const [contractBusy, setContractBusy] = useState(false)
+  const [contractErr, setContractErr] = useState<string | null>(null)
+  // Номера всех договоров — чтобы предупредить о повторе номера
+  const [allContractNames, setAllContractNames] = useState<string[]>([])
+
+  // Всплывающее уведомление после создания заказа (исчезает через 5 сек)
+  const [toast, setToast] = useState<string | null>(null)
 
   // Currency: доллар (base USD) by default, since the price is per litre in dollars;
   // сум → order in UZS with a rate.
@@ -84,7 +93,17 @@ export default function CustomerOrderPage() {
     getUoms(token)
       .then(us => setUomName(Object.fromEntries(us.map(u => [u.id, u.name]))))
       .catch(() => setUomName({}))
+    getAllContractNames(token)
+      .then(setAllContractNames)
+      .catch(() => setAllContractNames([]))
   }, [token])
+
+  // Уведомление о созданном заказе живёт 5 секунд.
+  useEffect(() => {
+    if (!toast) return
+    const id = setTimeout(() => setToast(null), 5000)
+    return () => clearTimeout(id)
+  }, [toast])
 
   // Reload contracts whenever the counterparty (or legal entity) changes.
   useEffect(() => {
@@ -150,6 +169,32 @@ export default function CustomerOrderPage() {
   const totalLiters = rows.reduce((s, r) => s + litersOf(r), 0)
   // Base unit label (e.g. шт) for a row's product
   const baseUnitLabel = (r: Pos) => (r.product?.uomId && uomName[r.product.uomId]) || 'шт'
+  // Подпись упаковки с её размером из карточки товара: «коробка (8 шт)»
+  const packLabel = (r: Pos, p: { id: string; quantity: number; uomId: string | null }) =>
+    `${(p.uomId && uomName[p.uomId]) || 'упаковка'} (${p.quantity} ${baseUnitLabel(r)})`
+
+  // Создание нового договора для выбранного контрагента.
+  async function handleCreateContract() {
+    const name = (newContract ?? '').trim()
+    if (!name || !agent || !orgId) return
+    setContractBusy(true); setContractErr(null)
+    try {
+      const created = await createContract(token, { name, agentId: agent.id, orgId })
+      setContracts(cs => [...cs, created])
+      setContractId(created.id)
+      setAllContractNames(ns => [...ns, created.name])
+      setNewContract(null)
+    } catch (e) {
+      setContractErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setContractBusy(false)
+    }
+  }
+  // Номер уже занят? (сравниваем без учёта регистра и пробелов по краям)
+  const contractDuplicate = !!newContract?.trim()
+    && allContractNames.some(n => n.trim().toLowerCase() === newContract.trim().toLowerCase())
+  // Выбранный статус — для окраски селекта в цвет МойСклад
+  const selectedState = states.find(s => s.id === stateId) ?? null
   // Остаток label for the product dropdown: "25 шт"
   const stockLabel = (p: ProductOption) => {
     const unit = (p.uomId && uomName[p.uomId]) || 'шт'
@@ -193,7 +238,9 @@ export default function CustomerOrderPage() {
           }
         }),
       })
-      setOkMsg(`Заказ создан${doc.name ? ` № ${doc.name}` : ''}`)
+      const msg = `Заказ создан${doc.name ? ` № ${doc.name}` : ''}`
+      setOkMsg(msg)
+      setToast(msg)          // всплывающее окно, исчезнет через 5 сек
       // Reset to an empty order
       setRows([freshRow()])
       setAgent(null)
@@ -235,18 +282,65 @@ export default function CustomerOrderPage() {
             <SearchCell value={agent} onSelect={setAgent} fetch={searchCounterparties} token={token} placeholder="Выберите контрагента…" />
           </div>
         </label>
-        <label className="flex items-center gap-1.5 text-xs text-muted">
+        <div className="flex items-center gap-1.5 text-xs text-muted">
           Договор:
-          <select
-            value={contractId}
-            onChange={e => setContractId(e.target.value)}
-            disabled={!agent || contracts.length === 0}
-            className={`${FIELD} max-w-[200px] disabled:opacity-50`}
-          >
-            <option value="">{!agent ? '— выберите контрагента —' : contracts.length === 0 ? '— нет договоров —' : '— не задан —'}</option>
-            {contracts.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-        </label>
+          {newContract === null ? (
+            <>
+              <select
+                value={contractId}
+                onChange={e => setContractId(e.target.value)}
+                disabled={!agent || contracts.length === 0}
+                className={`${FIELD} max-w-[200px] disabled:opacity-50`}
+              >
+                <option value="">{!agent ? '— выберите контрагента —' : contracts.length === 0 ? '— нет договоров —' : '— не задан —'}</option>
+                {contracts.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+              <button
+                type="button"
+                onClick={() => { setNewContract(''); setContractErr(null) }}
+                disabled={!agent || !orgId}
+                title={agent ? 'Создать договор' : 'Сначала выберите контрагента'}
+                className="w-7 h-7 shrink-0 rounded-md border border-line flex items-center justify-center text-muted hover:text-accent hover:border-accent transition-colors disabled:opacity-40 disabled:hover:text-muted disabled:hover:border-line"
+              >
+                <Plus size={14} />
+              </button>
+            </>
+          ) : (
+            <>
+              <input
+                type="text"
+                value={newContract}
+                autoFocus
+                onChange={e => setNewContract(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && !contractDuplicate) handleCreateContract()
+                  if (e.key === 'Escape') { setNewContract(null); setContractErr(null) }
+                }}
+                placeholder="Номер договора"
+                className={`${FIELD} w-44 ${contractDuplicate ? 'border-red-500' : ''}`}
+              />
+              <button
+                type="button"
+                onClick={handleCreateContract}
+                disabled={!newContract.trim() || contractBusy || contractDuplicate}
+                title={contractDuplicate ? 'Такой номер уже существует' : 'Сохранить договор'}
+                className="w-7 h-7 shrink-0 rounded-md bg-accent text-white flex items-center justify-center hover:bg-accent-strong transition-colors disabled:opacity-40"
+              >
+                {contractBusy ? <Loader2 size={13} className="animate-spin" /> : <Check size={14} />}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setNewContract(null); setContractErr(null) }}
+                title="Отмена"
+                className="w-7 h-7 shrink-0 rounded-md border border-line flex items-center justify-center text-muted hover:text-red-500 transition-colors"
+              >
+                <X size={14} />
+              </button>
+              {contractDuplicate && <span className="text-[11px] text-red-500">Номер уже занят</span>}
+              {contractErr && <span className="text-[11px] text-red-500">{contractErr}</span>}
+            </>
+          )}
+        </div>
         <label className="flex items-center gap-1.5 text-xs text-muted">
           Валюта:
           <select value={currency} onChange={e => setCurrency(e.target.value as Cur)} className={FIELD}>
@@ -263,10 +357,28 @@ export default function CustomerOrderPage() {
         )}
         <label className="flex items-center gap-1.5 text-xs text-muted">
           Статус:
-          <select value={stateId} onChange={e => setStateId(e.target.value)} className={`${FIELD} max-w-[180px]`}>
-            <option value="">— не задан —</option>
-            {states.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-          </select>
+          <span className="relative flex items-center">
+            {/* Цветовая метка статуса — тот же цвет, что в МойСклад */}
+            {selectedState && (
+              <span
+                className="absolute left-2 w-2.5 h-2.5 rounded-full pointer-events-none ring-1 ring-black/10"
+                style={{ backgroundColor: selectedState.color }}
+              />
+            )}
+            <select
+              value={stateId}
+              onChange={e => setStateId(e.target.value)}
+              className={`${FIELD} max-w-[180px] ${selectedState ? 'pl-6' : ''}`}
+              style={selectedState
+                ? { color: selectedState.color, borderColor: selectedState.color, fontWeight: 600 }
+                : undefined}
+            >
+              <option value="" style={{ color: 'inherit', fontWeight: 400 }}>— не задан —</option>
+              {states.map(s => (
+                <option key={s.id} value={s.id} style={{ color: s.color, fontWeight: 600 }}>{s.name}</option>
+              ))}
+            </select>
+          </span>
         </label>
         <div className="flex-1" />
         <button
@@ -287,9 +399,9 @@ export default function CustomerOrderPage() {
           <div className="grid sticky top-0 z-20 bg-surface-2 border-b border-line shadow-sm" style={{ gridTemplateColumns: COLS }}>
             <div className={GUTTER} />
             <HeadCell label="Товар" />
-            <HeadCell label="Ед. изм." />
-            <HeadCell label="Остаток" className="text-right" />
             <HeadCell label="Количество" className="text-right" />
+            <HeadCell label="Остаток" className="text-right" />
+            <HeadCell label="Ед. изм." />
             <HeadCell label="Объём, л" className="text-right" />
             <HeadCell label="Цена за литр, $" className="text-right" />
             <HeadCell label="Сумма" className="text-right" />
@@ -312,6 +424,14 @@ export default function CustomerOrderPage() {
                   itemClassName={p => (p.stock <= 0 ? 'text-red-500 opacity-50' : '')}
                 />
               </div>
+              <div className={CELLBOX} title={packOf(r) ? `Количество в коробках · 1 коробка = ${factorOf(r)} ${baseUnitLabel(r)}` : undefined}>
+                <GroupedNumberInput value={r.quantity} onChange={n => patchRow(r.key, { quantity: n })} placeholder="0" className={`${CELL} font-mono text-right`} />
+              </div>
+              <div className="border-r border-line bg-surface-2/40 flex items-center justify-end px-2.5">
+                <span className={`font-mono text-sm tabular-nums ${r.product ? (r.product.stock <= 0 ? 'text-red-500 opacity-60' : 'text-muted') : 'text-faint'}`}>
+                  {r.product ? stockLabel(r.product) : '—'}
+                </span>
+              </div>
               <div className={CELLBOX}>
                 <select
                   value={r.packId}
@@ -321,25 +441,23 @@ export default function CustomerOrderPage() {
                 >
                   <option value="">{baseUnitLabel(r)}</option>
                   {(r.product?.packs ?? []).map(p => (
-                    <option key={p.id} value={p.id}>{(p.uomId && uomName[p.uomId]) || 'упаковка'}</option>
+                    <option key={p.id} value={p.id}>{packLabel(r, p)}</option>
                   ))}
                 </select>
               </div>
               <div className="border-r border-line bg-surface-2/40 flex items-center justify-end px-2.5">
-                <span className={`font-mono text-sm tabular-nums ${r.product ? (r.product.stock <= 0 ? 'text-red-500 opacity-60' : 'text-muted') : 'text-faint'}`}>
-                  {r.product ? stockLabel(r.product) : '—'}
-                </span>
-              </div>
-              <div className={CELLBOX}>
-                <GroupedNumberInput value={r.quantity} onChange={n => patchRow(r.key, { quantity: n })} placeholder="0" className={`${CELL} font-mono text-right`} />
-              </div>
-              <div className="border-r border-line bg-surface-2/40 flex items-center justify-end px-2.5">
-                <span className="font-mono text-sm text-muted tabular-nums" title={r.product ? `${fmtMoney(r.product.volume)} л за шт` : undefined}>
+                <span className="font-mono text-sm text-muted tabular-nums" title={r.product ? `${fmtMoney(r.product.volume)} л за ${baseUnitLabel(r)}` : undefined}>
                   {r.product ? `${fmtMoney(litersOf(r))} л` : '—'}
                 </span>
               </div>
               <div className={CELLBOX}>
-                <GroupedNumberInput value={r.pricePerLiter} onChange={n => patchRow(r.key, { pricePerLiter: n })} placeholder="0" className={`${CELL} font-mono text-right`} />
+                <GroupedNumberInput
+                  value={r.pricePerLiter}
+                  onChange={n => patchRow(r.key, { pricePerLiter: n })}
+                  placeholder="0"
+                  decimalComma
+                  className={`${CELL} font-mono text-right font-bold`}
+                />
               </div>
               <div className="border-r border-line bg-surface-2/40 flex items-center justify-end px-2.5">
                 <span className="font-mono text-sm text-muted tabular-nums">{fmtMoney(sumOf(r))}</span>
@@ -411,6 +529,32 @@ export default function CustomerOrderPage() {
         {error && <span className="text-red-600">Ошибка: {error}</span>}
         {!okMsg && !error && <span>Заказ покупателя · МойСклад</span>}
       </div>
+
+      {/* Всплывающее уведомление о созданном заказе — само исчезает через 5 секунд */}
+      {toast && (
+        <div className="fixed inset-0 z-[2000] flex items-start justify-center pt-24 pointer-events-none">
+          <div
+            role="status"
+            className="pointer-events-auto flex items-center gap-3 rounded-xl border border-green-500/30 bg-surface px-5 py-4 shadow-2xl"
+          >
+            <span className="w-9 h-9 shrink-0 rounded-full bg-green-500/15 flex items-center justify-center">
+              <Check size={18} className="text-green-600" />
+            </span>
+            <div>
+              <p className="text-sm font-semibold text-fg">{toast}</p>
+              <p className="text-xs text-muted">Данные сохранены в МойСклад</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setToast(null)}
+              title="Закрыть"
+              className="ml-2 w-7 h-7 rounded flex items-center justify-center text-faint hover:text-fg hover:bg-surface-2 transition-colors"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
