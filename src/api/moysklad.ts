@@ -393,6 +393,72 @@ export interface OrderPositionInput {
   pack?: Record<string, unknown>  // упаковка: { id, quantity, uom } — omit for base unit
 }
 
+/**
+ * Builds the `pack` payload for a position. The uom reference is rebuilt from the
+ * pack's uom id rather than passed through, because the assortment listing does
+ * not always carry a complete `uom.meta` — and MoySklad silently drops a pack
+ * whose uom it cannot resolve (the position then falls back to base units).
+ */
+export function buildPackPayload(
+  pack: { id: string; quantity: number; uomId: string | null; uomMeta: Record<string, unknown> | null }
+): Record<string, unknown> {
+  const uom = pack.uomId ? msRef('uom', pack.uomId) : (pack.uomMeta ? { meta: pack.uomMeta } : null)
+  return { id: pack.id, quantity: pack.quantity, ...(uom ? { uom } : {}) }
+}
+
+/** A position as MoySklad stored it — used to verify packs were actually applied. */
+export interface StoredPosition {
+  id: string
+  quantity: number
+  /** Present only when MoySklad accepted the упаковка on that position. */
+  hasPack: boolean
+  assortmentId: string | null
+}
+
+/** Reads back the positions of a created order, in document order. */
+export async function getOrderPositions(token: string, orderId: string): Promise<StoredPosition[]> {
+  type Row = {
+    id: string; quantity: number
+    pack?: { id?: string } | null
+    assortment?: { meta?: { href?: string } }
+  }
+  const data = await get<{ rows?: Row[] }>(`/entity/customerorder/${orderId}/positions`, { limit: '1000' }, token)
+    .catch(() => ({ rows: [] as Row[] }))
+  return (data.rows ?? []).map(r => ({
+    id: r.id,
+    quantity: r.quantity,
+    hasPack: !!r.pack,
+    assortmentId: idFromHref(r.assortment?.meta?.href),
+  }))
+}
+
+/** Corrects a stored position's quantity/price (used when упаковка wasn't applied). */
+export async function updateOrderPosition(
+  token: string, orderId: string, positionId: string, p: { quantity: number; priceMajor: number }
+): Promise<void> {
+  const r = await msFetch(`${BASE}/entity/customerorder/${orderId}/positions/${positionId}`, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/json;charset=utf-8',
+    },
+    body: JSON.stringify({
+      quantity: p.quantity,
+      price: Math.round(p.priceMajor * 100 * 100) / 100,
+    }),
+  })
+  if (!r.ok) {
+    const text = await r.text().catch(() => '')
+    let msg = `HTTP ${r.status}`
+    try {
+      const parsed = JSON.parse(text) as { errors?: Array<{ error?: string }> }
+      if (parsed?.errors?.[0]?.error) msg = parsed.errors[0].error!
+    } catch { /* not JSON */ }
+    throw new Error(msg)
+  }
+}
+
 export interface CreateOrderParams {
   organizationId: string
   agentId: string

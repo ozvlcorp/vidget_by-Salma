@@ -3,6 +3,7 @@ import { Plus, X, Loader2, Check } from 'lucide-react'
 import {
   getOrganizations, getStores, searchCounterparties, searchProducts, createCustomerOrder,
   getCurrencies, getOrderStates, getUoms, getContracts, createContract, getAllContractNames, msMoment,
+  buildPackPayload, getOrderPositions, updateOrderPosition,
   type NamedOption, type OrganizationOption, type StoreOption, type ProductOption,
   type CurrencyRate, type OrderState,
 } from '../api/moysklad'
@@ -227,17 +228,37 @@ export default function CustomerOrderPage() {
         rateValue: currency === 'UZS' ? 1 / rate : undefined,
         stateMeta: state?.meta,
         contractId: contractId || undefined,
-        positions: validRows.map(r => ({
-          assortmentId: r.product!.id,
-          assortmentType: r.product!.type,
-          // Количество в ШТУКАХ: коробки разложены по размеру упаковки из карточки
-          // (10 коробок × 8 шт = 80 шт). МойСклад трактует quantity как базовые
-          // единицы и не домножает на упаковку, поэтому пересчитываем сами.
-          quantity: baseQtyOf(r),
-          // Цена за одну штуку → сумма в МойСклад = цена × количество.
-          priceMajor: unitPriceMajorOf(r),
-        })),
+        // Единицы сохраняем как в виджете: выбрана коробка → позиция в коробках
+        // с упаковкой, выбраны штуки → в штуках. Ниже результат проверяется.
+        positions: validRows.map(r => {
+          const pack = packOf(r)
+          return {
+            assortmentId: r.product!.id,
+            assortmentType: r.product!.type,
+            quantity: r.quantity,
+            // Цена за выбранную единицу (за коробку, если выбрана коробка).
+            priceMajor: unitPriceMajorOf(r) * factorOf(r),
+            pack: pack ? buildPackPayload(pack) : undefined,
+          }
+        }),
       })
+
+      // МойСклад молча отбрасывает упаковку, если не может её применить — тогда
+      // количество осталось бы в коробках, но считалось бы штуками (10 коробок → 10 шт).
+      // Проверяем сохранённые позиции и, если упаковка не принята, пересчитываем в штуки.
+      const boxRows = validRows.filter(r => packOf(r))
+      if (boxRows.length > 0) {
+        const stored = await getOrderPositions(token, doc.id).catch(() => [])
+        const fixes = boxRows.flatMap(r => {
+          const sp = stored.find(s => s.assortmentId === r.product!.id && !s.hasPack)
+          return sp
+            ? [{ positionId: sp.id, quantity: baseQtyOf(r), priceMajor: unitPriceMajorOf(r) }]
+            : []
+        })
+        for (const f of fixes) {
+          await updateOrderPosition(token, doc.id, f.positionId, f).catch(() => {})
+        }
+      }
       const msg = `Заказ создан${doc.name ? ` № ${doc.name}` : ''}`
       setOkMsg(msg)
       setToast(msg)          // всплывающее окно, исчезнет через 5 сек
