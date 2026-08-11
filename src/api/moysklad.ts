@@ -9,6 +9,29 @@ export function msDate(d: Date): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
 }
 
+/**
+ * Document timestamp for MoySklad.
+ *
+ * MoySklad has no timezone in its datetime format and always reads the value as
+ * Moscow time (MSK, UTC+3), then shows it back in the viewer's timezone. Sending
+ * the raw local clock therefore shifts the document (e.g. Tashkent UTC+5 sees
+ * "+2 hours"). So we take the chosen calendar date plus the current local
+ * time-of-day and re-express that instant as Moscow wall-clock time.
+ *
+ * @param dateStr calendar date picked in the widget, "YYYY-MM-DD"
+ */
+export function msMoment(dateStr: string): string {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  const now = new Date()
+  // The instant the user means: their chosen date at the current local time.
+  const local = new Date(y, (m || 1) - 1, d || 1, now.getHours(), now.getMinutes(), now.getSeconds())
+  // Same instant expressed as Moscow wall clock (read via UTC getters after +3h).
+  const msk = new Date(local.getTime() + 3 * 60 * 60 * 1000)
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${msk.getUTCFullYear()}-${p(msk.getUTCMonth() + 1)}-${p(msk.getUTCDate())} `
+    + `${p(msk.getUTCHours())}:${p(msk.getUTCMinutes())}:${p(msk.getUTCSeconds())}`
+}
+
 // ─── Rate Limiter ──────────────────────────────────────────────────────────────
 
 class Semaphore {

@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { Plus, X, Loader2, Check } from 'lucide-react'
 import {
   getOrganizations, getStores, searchCounterparties, searchProducts, createCustomerOrder,
-  getCurrencies, getOrderStates, getUoms, getContracts, createContract, getAllContractNames,
+  getCurrencies, getOrderStates, getUoms, getContracts, createContract, getAllContractNames, msMoment,
   type NamedOption, type OrganizationOption, type StoreOption, type ProductOption,
   type CurrencyRate, type OrderState,
 } from '../api/moysklad'
@@ -221,7 +221,7 @@ export default function CustomerOrderPage() {
         organizationId: orgId,
         agentId: agent.id,
         storeId: storeId || undefined,
-        moment: `${date} 12:00:00`,
+        moment: msMoment(date),
         // сум → document currency = сум with rate 1/Курс; доллар → base currency
         currencyId: currency === 'UZS' ? uzsCurrency?.id : undefined,
         rateValue: currency === 'UZS' ? 1 / rate : undefined,

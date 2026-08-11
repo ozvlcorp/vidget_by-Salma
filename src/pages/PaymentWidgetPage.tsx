@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom'
 import { Plus, X, Loader2 } from 'lucide-react'
 import {
   searchCounterparties, getOrganizations, createPaymentDocument, getCurrencies,
-  getDocAttributes, buildFromWhomAttribute, searchFromWhomValues,
+  getDocAttributes, buildFromWhomAttribute, searchFromWhomValues, msMoment,
   type NamedOption, type OrganizationOption, type PaymentDocType, type CurrencyRate, type DocAttribute,
 } from '../api/moysklad'
 import { useAppContext } from '../context/AppContext'
@@ -237,7 +237,7 @@ export default function PaymentWidgetPage() {
           currencyId: row.currency === 'UZS' ? uzsCurrency!.id : undefined,
           rateValue: row.currency === 'UZS' ? 1 / row.rate : undefined,
           attributes,
-          moment: `${row.date} 12:00:00`,
+          moment: msMoment(row.date),
         })
         entries.push([row.key, { status: 'success', link: doc.uuidHref }])
       } catch (e) {
