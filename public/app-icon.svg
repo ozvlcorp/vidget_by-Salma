@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Иконка решения">
+  <!--
+    Иконка решения для каталога МойСклад.
+    По требованиям: сплошной фон, крупная отчётливая форма, без слов,
+    без скриншотов и элементов интерфейса, без логотипа МоегоСклада.
+  -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2563eb"/>
+      <stop offset="1" stop-color="#1d4ed8"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Фон -->
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+
+  <!-- Коробка (товар) -->
+  <g fill="#ffffff">
+    <path d="M136 196l120-58 120 58-120 58-120-58z" opacity="0.95"/>
+    <path d="M128 214l120 58v128l-120-58V214z" opacity="0.78"/>
+    <path d="M384 214l-120 58v128l120-58V214z" opacity="0.6"/>
+  </g>
+
+  <!-- Стрелка прихода средств -->
+  <g fill="#ffffff">
+    <circle cx="376" cy="152" r="60" fill="#ffffff"/>
+    <path d="M376 118l34 42h-22v34h-24v-34h-22l34-42z" fill="#1d4ed8"/>
+  </g>
+</svg>

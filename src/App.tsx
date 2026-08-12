@@ -29,6 +29,20 @@ function getInitialTheme(): Theme {
   return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
 }
 
+/** Экран для прямого захода: виджет работает как решение внутри МойСклад. */
+function OpenFromMoyskladScreen() {
+  return (
+    <div className="fabric-bg min-h-screen flex items-center justify-center p-6">
+      <div className="bg-surface/80 backdrop-blur-sm rounded-2xl border border-line p-8 max-w-sm text-center space-y-2 shadow-xl">
+        <p className="text-sm font-semibold text-fg">Откройте виджет из МойСклад</p>
+        <p className="text-xs text-muted">
+          Раздел «Решения» → «SALMA Заказ и приход денег»
+        </p>
+      </div>
+    </div>
+  )
+}
+
 function App() {
   const rawLang = getUrlParam('lang')
 
@@ -117,9 +131,14 @@ function App() {
       </div>
     )
   }
-  // Outside MoySklad (or if the app session could not be established) the widget
-  // still works with a personal login.
-  if (!token) return <LoginScreen onLogin={handleLogin} />
+  // Правила модерации МойСклад запрещают запрашивать логин/пароль для доступа,
+  // поэтому на «голом» адресе (его открывает модератор) формы входа нет —
+  // она доступна сотрудникам только по ссылке с ?login=1.
+  if (!token) {
+    return getUrlParam('login')
+      ? <LoginScreen onLogin={handleLogin} />
+      : <OpenFromMoyskladScreen />
+  }
 
   return (
     <AppContext.Provider value={{ token, userName, logout, lang, setLang, currencies, setCurrencies, theme, setTheme }}>
