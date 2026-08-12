@@ -139,7 +139,7 @@ function FirmCell({
 }
 
 export default function PaymentWidgetPage() {
-  const { token } = useAppContext()
+  const { token, userName } = useAppContext()
   const nextKey = useRef(1)
 
   // Ширины столбцов + перетаскивание границ (сохраняются между сессиями).
@@ -247,6 +247,8 @@ export default function PaymentWidgetPage() {
           ...resolveDocCurrency(allCurrencies, row.currency, row.rate),
           attributes,
           moment: msMoment(row.date),
+          // Автором в МойСклад числится токен, поэтому ФИО оформившего пишем в комментарий.
+          description: userName ? `Оформил: ${userName}` : undefined,
         })
         entries.push([row.key, { status: 'success', link: doc.uuidHref }])
       } catch (e) {

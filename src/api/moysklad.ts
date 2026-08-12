@@ -139,7 +139,8 @@ export async function getMyName(token: string): Promise<string> {
 export async function getMyContext(token: string): Promise<{ name: string; accountId: string }> {
   type Ctx = { name?: string; fullName?: string; accountId?: string }
   const data = await get<Ctx>('/context/employee', {}, token).catch(() => ({} as Ctx))
-  return { name: data.name || data.fullName || '', accountId: data.accountId ?? '' }
+  // fullName — «Фамилия Имя Отчество»; name часто сокращённое, поэтому предпочитаем полное.
+  return { name: data.fullName || data.name || '', accountId: data.accountId ?? '' }
 }
 
 // Виджет сделан для одного клиента: пускаем только его аккаунт МойСклад.
@@ -524,6 +525,8 @@ export interface CreateOrderParams {
   rateValue?: number       // base per 1 unit of currencyId
   stateMeta?: Record<string, unknown>  // chosen status meta
   contractId?: string      // договор (optional)
+  /** Комментарий к документу — сюда пишем ФИО сотрудника, оформившего его. */
+  description?: string
   positions: OrderPositionInput[]
 }
 
@@ -548,6 +551,7 @@ export async function createCustomerOrder(token: string, p: CreateOrderParams): 
   if (p.storeId) body.store = msRef('store', p.storeId)
   if (p.moment) body.moment = p.moment
   if (p.contractId) body.contract = msRef('contract', p.contractId)
+  if (p.description) body.description = p.description
   if (p.stateMeta) body.state = { meta: p.stateMeta }
   if (p.currencyId) {
     body.rate = p.rateValue != null && p.rateValue > 0
@@ -692,6 +696,8 @@ export interface CreatePaymentDocParams {
    * Omit to let MoySklad apply the current rate from the currency directory.
    */
   rateValue?: number
+  /** Комментарий к документу — сюда пишем ФИО сотрудника, оформившего его. */
+  description?: string
   paymentPurpose?: string
   /** "YYYY-MM-DD HH:MM:SS" — omitted means MoySklad stamps "now" */
   moment?: string
@@ -709,6 +715,7 @@ export async function createPaymentDocument(token: string, p: CreatePaymentDocPa
     sum: Math.round(p.sumMajor * 100),
   }
   if (p.moment) body.moment = p.moment
+  if (p.description) body.description = p.description
   if (p.paymentPurpose) body.paymentPurpose = p.paymentPurpose
   if (p.currencyId) {
     // With a value → manual override; without → MoySklad uses the current directory rate.

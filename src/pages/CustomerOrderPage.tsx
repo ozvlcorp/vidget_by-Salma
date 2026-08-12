@@ -33,7 +33,7 @@ const DEFAULT_COL_WIDTHS = [420, 104, 110, 132, 116, 140, 150]
 const FIELD = 'h-8 px-2 rounded-md border border-line bg-surface text-fg text-xs'
 
 export default function CustomerOrderPage() {
-  const { token } = useAppContext()
+  const { token, userName } = useAppContext()
   const nextKey = useRef(1)
 
   // Ширины столбцов + перетаскивание границ (сохраняются между сессиями).
@@ -238,6 +238,8 @@ export default function CustomerOrderPage() {
         ...resolveDocCurrency(allCurrencies, currency, rate),
         stateMeta: state?.meta,
         contractId: contractId || undefined,
+        // Автором в МойСклад числится токен, поэтому ФИО оформившего пишем в комментарий.
+        description: userName ? `Оформил: ${userName}` : undefined,
         positions: validRows.map(r => ({
           assortmentId: r.product!.id,
           assortmentType: r.product!.type,
