@@ -131,13 +131,15 @@ function App() {
       </div>
     )
   }
-  // Правила модерации МойСклад запрещают запрашивать логин/пароль для доступа,
-  // поэтому на «голом» адресе (его открывает модератор) формы входа нет —
-  // она доступна сотрудникам только по ссылке с ?login=1.
+  // Обычно (и по умолчанию) виджет открывается по прямой ссылке и просит вход.
+  // Только для сборки, которая пойдёт на модерацию, включается VITE_HIDE_LOGIN=1:
+  // правила МойСклад запрещают запрашивать логин/пароль, поэтому там форма
+  // доступна лишь по ссылке с ?login=1.
   if (!token) {
-    return getUrlParam('login')
-      ? <LoginScreen onLogin={handleLogin} />
-      : <OpenFromMoyskladScreen />
+    const hideDirectLogin = import.meta.env.VITE_HIDE_LOGIN === '1' && !getUrlParam('login')
+    return hideDirectLogin
+      ? <OpenFromMoyskladScreen />
+      : <LoginScreen onLogin={handleLogin} />
   }
 
   return (
