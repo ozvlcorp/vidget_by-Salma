@@ -8,6 +8,7 @@ import { parseLang } from './i18n'
 import type { Lang } from './i18n'
 import PaymentWidgetPage from './pages/PaymentWidgetPage'
 import CustomerOrderPage from './pages/CustomerOrderPage'
+import DashboardPage from './pages/DashboardPage'
 import LoginScreen from './components/LoginScreen'
 
 const TOKEN_KEY = 'oy-ms-token'
@@ -149,11 +150,12 @@ function App() {
   )
 }
 
-type Section = 'payment' | 'order'
+type Section = 'payment' | 'order' | 'dashboard'
 
 const SECTIONS: Array<{ id: Section; label: string }> = [
   { id: 'payment', label: 'Разбивка платежа' },
   { id: 'order', label: 'Заказ покупателя' },
+  { id: 'dashboard', label: 'Мои продажи' },
 ]
 
 function Shell() {
@@ -199,7 +201,9 @@ function Shell() {
         </button>
       </nav>
       <div className="flex-1 overflow-hidden">
-        {section === 'payment' ? <PaymentWidgetPage /> : <CustomerOrderPage />}
+        {section === 'payment' ? <PaymentWidgetPage />
+          : section === 'order' ? <CustomerOrderPage />
+          : <DashboardPage />}
       </div>
     </div>
   )

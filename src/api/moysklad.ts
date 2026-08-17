@@ -28,10 +28,14 @@ export function msDate(d: Date): string {
  * @param dateStr calendar date picked in the widget, "YYYY-MM-DD"
  */
 export function msMoment(dateStr: string): string {
-  const [y, m, d] = dateStr.split('-').map(Number)
   const now = new Date()
-  // The instant the user means: their chosen date at the current local time.
-  const local = new Date(y, (m || 1) - 1, d || 1, now.getHours(), now.getMinutes(), now.getSeconds())
+  return mskAt(dateStr, now.getHours(), now.getMinutes(), now.getSeconds())
+}
+
+/** Локальные дата+время выбранного дня, выраженные как московские часы. */
+export function mskAt(dateStr: string, h: number, m: number, s: number): string {
+  const [y, mo, d] = dateStr.split('-').map(Number)
+  const local = new Date(y, (mo || 1) - 1, d || 1, h, m, s)
   // Same instant expressed as Moscow wall clock (read via UTC getters after +3h).
   const msk = new Date(local.getTime() + 3 * 60 * 60 * 1000)
   const p = (n: number) => String(n).padStart(2, '0')
@@ -440,6 +444,78 @@ export async function createContract(
   }
   const data = await r.json() as { id: string; name: string }
   return { id: data.id, name: data.name }
+}
+
+// ─── Мини-дашборд продаж ──────────────────────────────────────────────────────
+
+/** Одна отгруженная позиция заказа, приведённая к литрам и коробкам. */
+export interface SalesOrder {
+  id: string
+  name: string
+  moment: string
+  agentName: string
+  /** Кто оформил: из комментария «Оформил: …», иначе владелец документа. */
+  employee: string
+  liters: number
+  boxes: number
+  sumMajor: number
+}
+
+/**
+ * Заказы покупателей за период, посчитанные в литрах и коробках.
+ *
+ * Литраж = объём товара × количество (в документе количество в базовых единицах).
+ * Коробки = количество ÷ размер упаковки из карточки товара.
+ */
+export async function getSalesOrders(token: string, fromDate: string, toDate: string): Promise<SalesOrder[]> {
+  type Pos = {
+    quantity?: number
+    price?: number
+    assortment?: { volume?: number; packs?: Array<{ quantity?: number }> }
+  }
+  type Row = {
+    id: string; name?: string; moment?: string; sum?: number; description?: string
+    agent?: { name?: string }
+    owner?: { name?: string; fullName?: string }
+    positions?: { rows?: Pos[] }
+  }
+  const filter = `moment>=${mskAt(fromDate, 0, 0, 0)};moment<=${mskAt(toDate, 23, 59, 59)}`
+  const out: SalesOrder[] = []
+  const limit = 100
+  for (let offset = 0; offset < 1000; offset += limit) {
+    const data = await get<{ rows?: Row[] }>('/entity/customerorder', {
+      filter,
+      expand: 'agent,owner,positions.assortment',
+      limit: String(limit),
+      offset: String(offset),
+      order: 'moment,desc',
+    }, token).catch(() => ({ rows: [] as Row[] }))
+    const rows = data.rows ?? []
+    for (const r of rows) {
+      let liters = 0, boxes = 0
+      for (const p of r.positions?.rows ?? []) {
+        const qty = p.quantity ?? 0
+        const volume = p.assortment?.volume ?? 0
+        const packSize = p.assortment?.packs?.[0]?.quantity ?? 0
+        liters += volume * qty
+        if (packSize > 0) boxes += qty / packSize
+      }
+      // «Оформил: ФИО» — наш штамп; если его нет, берём владельца документа.
+      const stamped = /оформил:\s*(.+)/i.exec(r.description ?? '')?.[1]?.trim()
+      out.push({
+        id: r.id,
+        name: r.name ?? '',
+        moment: r.moment ?? '',
+        agentName: r.agent?.name ?? '—',
+        employee: stamped || r.owner?.fullName || r.owner?.name || '—',
+        liters,
+        boxes,
+        sumMajor: (r.sum ?? 0) / 100,
+      })
+    }
+    if (rows.length < limit) break
+  }
+  return out
 }
 
 export interface OrderPositionInput {
