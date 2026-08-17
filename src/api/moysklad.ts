@@ -188,8 +188,9 @@ export async function getCurrencies(token: string): Promise<CurrencyRate[]> {
       isoCode: c.isoCode,
       symbol: c.symbol,
       name: c.name,
-      // Round off floating-point noise from the inversion (used for display/override only)
-      rate: Number(basePerUnit.toPrecision(6)),
+      // Снимаем шум float от инверсии, но оставляем достаточно знаков: на 6
+      // значащих цифрах пересчёт крупных сумм уже даёт заметную погрешность.
+      rate: Number(basePerUnit.toPrecision(12)),
       isDefault: c.default ?? false,
     }
   })
@@ -458,7 +459,10 @@ export interface SalesOrder {
   employee: string
   liters: number
   boxes: number
+  /** Сумма в валюте самого документа. */
   sumMajor: number
+  /** Та же сумма в валюте учёта — по ней сравниваем заказы в разных валютах. */
+  baseSumMajor: number
 }
 
 /**
@@ -475,6 +479,8 @@ export async function getSalesOrders(token: string, fromDate: string, toDate: st
   }
   type Row = {
     id: string; name?: string; moment?: string; sum?: number; description?: string
+    /** Есть, только когда документ не в валюте учёта: value = единиц учёта за 1 единицу валюты документа. */
+    rate?: { value?: number }
     agent?: { name?: string }
     owner?: { name?: string; fullName?: string }
     positions?: { rows?: Pos[] }
@@ -511,6 +517,8 @@ export async function getSalesOrders(token: string, fromDate: string, toDate: st
         liters,
         boxes,
         sumMajor: (r.sum ?? 0) / 100,
+        // Без блока rate документ уже в валюте учёта, поэтому множитель 1.
+        baseSumMajor: ((r.sum ?? 0) / 100) * (r.rate?.value && r.rate.value > 0 ? r.rate.value : 1),
       })
     }
     if (rows.length < limit) break

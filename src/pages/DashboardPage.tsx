@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Loader2, RefreshCw } from 'lucide-react'
-import { getSalesOrders, type SalesOrder } from '../api/moysklad'
+import { getSalesOrders, getCurrencies, type SalesOrder, type CurrencyRate } from '../api/moysklad'
 import { useAppContext } from '../context/AppContext'
 import { HeadCell, GUTTER, todayStr, fmtMoney } from '../components/grid'
 
@@ -31,17 +31,33 @@ export default function DashboardPage() {
   const [to, setTo] = useState(todayStr())
   const [onlyMine, setOnlyMine] = useState(true)
   const [orders, setOrders] = useState<SalesOrder[] | null>(null)
+  // Заказы бывают и в сумах, и в долларах — приводим всё к одной валюте.
+  const [currencies, setCurrencies] = useState<CurrencyRate[]>([])
+  const [view, setView] = useState<'USD' | 'UZS'>('USD')
   const [error, setError] = useState<string | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
 
   useEffect(() => {
     let alive = true
-    setOrders(null); setError(null)
     getSalesOrders(token, from, to)
-      .then(rows => { if (alive) setOrders(rows) })
+      .then(rows => { if (alive) { setOrders(rows); setError(null) } })
       .catch(e => { if (alive) { setError(e instanceof Error ? e.message : String(e)); setOrders([]) } })
     return () => { alive = false }
   }, [token, from, to, reloadKey])
+
+  useEffect(() => {
+    let alive = true
+    getCurrencies(token)
+      .then(cs => { if (alive) setCurrencies(cs) })
+      .catch(() => { if (alive) setCurrencies([]) })
+    return () => { alive = false }
+  }, [token])
+
+  // CurrencyRate.rate = единиц валюты учёта за 1 единицу этой валюты,
+  // поэтому сумма в учёте, делённая на курс, даёт сумму в нужной валюте.
+  const viewRate = currencies.find(c => c.isoCode === view)?.rate ?? 0
+  const toView = viewRate > 0 ? 1 / viewRate : 1
+  const curLabel = view === 'USD' ? '$' : 'сум'
 
   // «Только мои» сравнивает по ФИО из комментария документа.
   const rows = useMemo(
@@ -52,30 +68,30 @@ export default function DashboardPage() {
   const total = useMemo(() => rows.reduce((acc, o) => ({
     liters: acc.liters + o.liters,
     boxes: acc.boxes + o.boxes,
-    sum: acc.sum + o.sumMajor,
-  }), { liters: 0, boxes: 0, sum: 0 }), [rows])
+    sum: acc.sum + o.baseSumMajor * toView,
+  }), { liters: 0, boxes: 0, sum: 0 }), [rows, toView])
 
   // Кому продали: сводка по контрагентам
   const byAgent = useMemo(() => {
     const map = new Map<string, { agent: string; orders: number; liters: number; boxes: number; sum: number }>()
     for (const o of rows) {
       const cur = map.get(o.agentName) ?? { agent: o.agentName, orders: 0, liters: 0, boxes: 0, sum: 0 }
-      cur.orders += 1; cur.liters += o.liters; cur.boxes += o.boxes; cur.sum += o.sumMajor
+      cur.orders += 1; cur.liters += o.liters; cur.boxes += o.boxes; cur.sum += o.baseSumMajor * toView
       map.set(o.agentName, cur)
     }
     return [...map.values()].sort((a, b) => b.liters - a.liters)
-  }, [rows])
+  }, [rows, toView])
 
   // Кто продал: сводка по сотрудникам (полезна, когда смотрим всех)
   const byEmployee = useMemo(() => {
     const map = new Map<string, { employee: string; orders: number; liters: number; boxes: number; sum: number }>()
     for (const o of rows) {
       const cur = map.get(o.employee) ?? { employee: o.employee, orders: 0, liters: 0, boxes: 0, sum: 0 }
-      cur.orders += 1; cur.liters += o.liters; cur.boxes += o.boxes; cur.sum += o.sumMajor
+      cur.orders += 1; cur.liters += o.liters; cur.boxes += o.boxes; cur.sum += o.baseSumMajor * toView
       map.set(o.employee, cur)
     }
     return [...map.values()].sort((a, b) => b.liters - a.liters)
-  }, [rows])
+  }, [rows, toView])
 
   const AGENT_COLS = '44px minmax(220px, 1fr) 90px 130px 120px 150px'
 
@@ -105,6 +121,20 @@ export default function DashboardPage() {
           <input type="checkbox" checked={onlyMine} onChange={e => setOnlyMine(e.target.checked)} className="accent-accent" />
           Только мои
         </label>
+        <div className="flex items-center rounded-md border border-line overflow-hidden">
+          {(['USD', 'UZS'] as const).map(c => (
+            <button
+              key={c}
+              type="button"
+              onClick={() => setView(c)}
+              className={`h-8 px-3 text-xs transition-colors ${
+                view === c ? 'bg-accent text-white' : 'text-muted hover:text-fg'
+              }`}
+            >
+              {c === 'USD' ? '$' : 'сум'}
+            </button>
+          ))}
+        </div>
         <button
           type="button"
           onClick={() => setReloadKey(k => k + 1)}
@@ -123,7 +153,7 @@ export default function DashboardPage() {
           {[
             { label: 'Продано литров', value: `${fmtNum(total.liters)} л` },
             { label: 'Продано коробок', value: fmtNum(total.boxes) },
-            { label: 'Сумма заказов', value: fmtMoney(total.sum) },
+            { label: `Сумма заказов, ${curLabel}`, value: fmtMoney(total.sum) },
             { label: 'Заказов', value: String(rows.length) },
           ].map(card => (
             <div key={card.label} className="rounded-xl border border-line bg-surface px-4 py-3">
@@ -143,7 +173,7 @@ export default function DashboardPage() {
               <HeadCell label="Заказов" className="text-right" />
               <HeadCell label="Литров" className="text-right" />
               <HeadCell label="Коробок" className="text-right" />
-              <HeadCell label="Сумма" className="text-right" />
+              <HeadCell label={`Сумма, ${curLabel}`} className="text-right" />
             </div>
             {byAgent.length === 0 ? (
               <div className="bg-surface px-4 py-6 text-center text-sm text-faint">
@@ -173,7 +203,7 @@ export default function DashboardPage() {
                 <HeadCell label="Заказов" className="text-right" />
                 <HeadCell label="Литров" className="text-right" />
                 <HeadCell label="Коробок" className="text-right" />
-                <HeadCell label="Сумма" className="text-right" />
+                <HeadCell label={`Сумма, ${curLabel}`} className="text-right" />
               </div>
               {byEmployee.map((e, i) => (
                 <div key={e.employee} className="grid border-b border-line last:border-b-0 bg-surface" style={{ gridTemplateColumns: AGENT_COLS }}>
