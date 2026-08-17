@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Sun, Moon, LogOut, Wallet, ClipboardList, BarChart3 } from 'lucide-react'
+import { Sun, Moon, LogOut, Wallet, ClipboardList, BarChart3, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { AppContext, useAppContext } from './context/AppContext'
 import type { Theme } from './context/AppContext'
@@ -159,14 +159,46 @@ const SECTIONS: Array<{ id: Section; label: string; Icon: LucideIcon }> = [
   { id: 'dashboard', label: 'Мои продажи', Icon: BarChart3 },
 ]
 
+const NAV_KEY = 'oy-nav-expanded'
+
 function Shell() {
   const { theme, setTheme, userName, logout } = useAppContext()
   const [section, setSection] = useState<Section>('payment')
+  // Свёрнутое/развёрнутое меню запоминается между визитами.
+  const [expanded, setExpanded] = useState<boolean>(() => {
+    try { return localStorage.getItem(NAV_KEY) !== '0' } catch { return true }
+  })
+  function toggleNav() {
+    setExpanded(v => {
+      try { localStorage.setItem(NAV_KEY, v ? '0' : '1') } catch { /* ignore */ }
+      return !v
+    })
+  }
+  const label = (text: string) => (expanded ? <span className="truncate">{text}</span> : null)
+
   return (
     <div className="h-screen flex overflow-hidden bg-base">
-      {/* Боковое меню: на узких экранах — только иконки */}
-      <nav className="shrink-0 w-14 lg:w-56 flex flex-col border-r border-line bg-surface-2">
-        <div className="flex-1 py-3 space-y-1 px-2">
+      {/* Боковое меню: сворачивается до иконок по клику */}
+      <nav
+        className={`shrink-0 flex flex-col border-r border-line bg-surface-2 transition-[width] duration-200 ease-out ${
+          expanded ? 'w-56' : 'w-14'
+        }`}
+      >
+        <div className="shrink-0 p-2">
+          <button
+            type="button"
+            onClick={toggleNav}
+            title={expanded ? 'Свернуть меню' : 'Развернуть меню'}
+            aria-label={expanded ? 'Свернуть меню' : 'Развернуть меню'}
+            aria-expanded={expanded}
+            className="w-full h-9 flex items-center gap-3 px-3 rounded-lg text-muted hover:text-fg hover:bg-surface-3 transition-colors"
+          >
+            {expanded
+              ? <PanelLeftClose size={18} className="shrink-0" />
+              : <PanelLeftOpen size={18} className="shrink-0" />}
+          </button>
+        </div>
+        <div className="flex-1 py-1 space-y-1 px-2 overflow-hidden">
           {SECTIONS.map(({ id, label, Icon }) => (
             <button
               key={id}
@@ -180,15 +212,15 @@ function Shell() {
               }`}
             >
               <Icon size={18} className="shrink-0" />
-              <span className="hidden lg:inline truncate">{label}</span>
+              {expanded && <span className="truncate">{label}</span>}
             </button>
           ))}
         </div>
 
         {/* Низ панели: кто вошёл, тема, выход */}
         <div className="shrink-0 border-t border-line p-2 space-y-1">
-          {userName && (
-            <p className="hidden lg:block px-3 pb-1 text-xs text-muted truncate" title={userName}>{userName}</p>
+          {userName && expanded && (
+            <p className="px-3 pb-1 text-xs text-muted truncate" title={userName}>{userName}</p>
           )}
           <button
             type="button"
@@ -198,7 +230,7 @@ function Shell() {
             className="w-full h-9 flex items-center gap-3 px-3 rounded-lg text-sm text-muted hover:text-fg hover:bg-surface-3 transition-colors"
           >
             {theme === 'dark' ? <Sun size={16} className="shrink-0" /> : <Moon size={16} className="shrink-0" />}
-            <span className="hidden lg:inline">{theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}</span>
+            {label(theme === 'dark' ? 'Светлая тема' : 'Тёмная тема')}
           </button>
           <button
             type="button"
@@ -208,7 +240,7 @@ function Shell() {
             className="w-full h-9 flex items-center gap-3 px-3 rounded-lg text-sm text-muted hover:text-red-500 hover:bg-red-500/10 transition-colors"
           >
             <LogOut size={16} className="shrink-0" />
-            <span className="hidden lg:inline">Выйти</span>
+            {label('Выйти')}
           </button>
         </div>
       </nav>
