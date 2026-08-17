@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
-import { Sun, Moon, LogOut } from 'lucide-react'
+import { Sun, Moon, LogOut, Wallet, ClipboardList, BarChart3 } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import { AppContext, useAppContext } from './context/AppContext'
 import type { Theme } from './context/AppContext'
 import type { CurrencyRate } from './api/moysklad'
@@ -152,54 +153,66 @@ function App() {
 
 type Section = 'payment' | 'order' | 'dashboard'
 
-const SECTIONS: Array<{ id: Section; label: string }> = [
-  { id: 'payment', label: 'Разбивка платежа' },
-  { id: 'order', label: 'Заказ покупателя' },
-  { id: 'dashboard', label: 'Мои продажи' },
+const SECTIONS: Array<{ id: Section; label: string; Icon: LucideIcon }> = [
+  { id: 'payment', label: 'Разбивка платежа', Icon: Wallet },
+  { id: 'order', label: 'Заказ покупателя', Icon: ClipboardList },
+  { id: 'dashboard', label: 'Мои продажи', Icon: BarChart3 },
 ]
 
 function Shell() {
   const { theme, setTheme, userName, logout } = useAppContext()
   const [section, setSection] = useState<Section>('payment')
   return (
-    <div className="h-screen flex flex-col overflow-hidden bg-base">
-      {/* Section tabs */}
-      <nav className="shrink-0 h-10 flex items-end gap-1 px-3 border-b border-line bg-surface-2">
-        {SECTIONS.map(s => (
+    <div className="h-screen flex overflow-hidden bg-base">
+      {/* Боковое меню: на узких экранах — только иконки */}
+      <nav className="shrink-0 w-14 lg:w-56 flex flex-col border-r border-line bg-surface-2">
+        <div className="flex-1 py-3 space-y-1 px-2">
+          {SECTIONS.map(({ id, label, Icon }) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setSection(id)}
+              title={label}
+              className={`w-full h-10 flex items-center gap-3 px-3 rounded-lg text-sm font-medium transition-colors ${
+                section === id
+                  ? 'bg-accent/10 text-accent'
+                  : 'text-muted hover:text-fg hover:bg-surface-3'
+              }`}
+            >
+              <Icon size={18} className="shrink-0" />
+              <span className="hidden lg:inline truncate">{label}</span>
+            </button>
+          ))}
+        </div>
+
+        {/* Низ панели: кто вошёл, тема, выход */}
+        <div className="shrink-0 border-t border-line p-2 space-y-1">
+          {userName && (
+            <p className="hidden lg:block px-3 pb-1 text-xs text-muted truncate" title={userName}>{userName}</p>
+          )}
           <button
-            key={s.id}
             type="button"
-            onClick={() => setSection(s.id)}
-            className={`px-4 h-9 -mb-px text-sm font-medium border-b-2 transition-colors ${
-              section === s.id
-                ? 'border-accent text-accent'
-                : 'border-transparent text-muted hover:text-fg'
-            }`}
+            onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+            title={theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}
+            aria-label="Переключить тему"
+            className="w-full h-9 flex items-center gap-3 px-3 rounded-lg text-sm text-muted hover:text-fg hover:bg-surface-3 transition-colors"
           >
-            {s.label}
+            {theme === 'dark' ? <Sun size={16} className="shrink-0" /> : <Moon size={16} className="shrink-0" />}
+            <span className="hidden lg:inline">{theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}</span>
           </button>
-        ))}
-        <div className="flex-1" />
-        {userName && <span className="mb-2 hidden sm:inline text-xs text-muted max-w-[200px] truncate" title={userName}>{userName}</span>}
-        <button
-          type="button"
-          onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-          title={theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}
-          aria-label="Переключить тему"
-          className="mb-0.5 w-8 h-8 flex items-center justify-center rounded-md text-muted hover:text-fg hover:bg-surface-3 transition-colors"
-        >
-          {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
-        </button>
-        <button
-          type="button"
-          onClick={logout}
-          title="Выйти"
-          aria-label="Выйти"
-          className="mb-0.5 w-8 h-8 flex items-center justify-center rounded-md text-muted hover:text-red-500 hover:bg-red-500/10 transition-colors"
-        >
-          <LogOut size={16} />
-        </button>
+          <button
+            type="button"
+            onClick={logout}
+            title="Выйти"
+            aria-label="Выйти"
+            className="w-full h-9 flex items-center gap-3 px-3 rounded-lg text-sm text-muted hover:text-red-500 hover:bg-red-500/10 transition-colors"
+          >
+            <LogOut size={16} className="shrink-0" />
+            <span className="hidden lg:inline">Выйти</span>
+          </button>
+        </div>
       </nav>
+
       <div className="flex-1 overflow-hidden">
         {section === 'payment' ? <PaymentWidgetPage />
           : section === 'order' ? <CustomerOrderPage />
