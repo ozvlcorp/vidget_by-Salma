@@ -270,6 +270,9 @@ export default function PaymentWidgetPage() {
   }
 
   const errorCount = Object.values(results).filter(r => r.status === 'error').length
+  // Текст первой ошибки виден сразу — раньше он прятался в подсказке и сотрудник
+  // видел только слово «ошибка».
+  const firstError = Object.values(results).find(r => r.status === 'error')?.message ?? null
 
   const gutter = GUTTER
 
@@ -473,7 +476,11 @@ export default function PaymentWidgetPage() {
         </button>
         <div className="flex-1" />
         {savedCount > 0 && <span className="text-green-600">✓ Создано документов: {savedCount}</span>}
-        {errorCount > 0 && <span className="text-red-600">Ошибок: {errorCount}</span>}
+        {errorCount > 0 && (
+          <span className="text-red-600 truncate" title={firstError ?? undefined}>
+            Ошибок: {errorCount}{firstError ? ` · ${firstError}` : ''}
+          </span>
+        )}
         {savedCount === 0 && errorCount === 0 && (
           <span>{allCurrencies.length > 0 ? 'Готово к отправке в МойСклад' : 'Справочник валют не загружен'}</span>
         )}

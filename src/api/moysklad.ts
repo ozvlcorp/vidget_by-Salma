@@ -93,6 +93,27 @@ async function get<T>(path: string, params: Record<string, string>, token: strin
   return r.json()
 }
 
+
+/**
+ * Человеческий текст ошибки МойСклад. 403 при создании документа почти всегда
+ * означает, что у сотрудника нет права на этот тип документа, — пишем прямо,
+ * иначе в интерфейсе видно только «ошибка».
+ */
+async function msError(r: Response, what: string): Promise<Error> {
+  const text = await r.text().catch(() => '')
+  let detail = ''
+  try {
+    const parsed = JSON.parse(text) as { errors?: Array<{ error?: string }> }
+    detail = parsed?.errors?.[0]?.error ?? ''
+  } catch { /* not JSON */ }
+  if (r.status === 403) {
+    return new Error(`Недостаточно прав в МойСклад: сотруднику не разрешено создавать ${what}.`
+      + ' Откройте Настройки → Сотрудники → роль сотрудника и включите право на этот документ.'
+      + (detail ? ` (${detail})` : ''))
+  }
+  return new Error(detail || `Ошибка МойСклад (HTTP ${r.status})`)
+}
+
 // ─── Auth ───────────────────────────────────────────────────────────────────────
 
 // UTF-8 → base64 (btoa alone breaks on non-Latin1 chars in a password).
@@ -648,15 +669,7 @@ export async function createCustomerOrder(token: string, p: CreateOrderParams): 
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
-  if (!r.ok) {
-    const text = await r.text().catch(() => '')
-    let msg = `HTTP ${r.status}`
-    try {
-      const parsed = JSON.parse(text) as { errors?: Array<{ error?: string }> }
-      if (parsed?.errors?.[0]?.error) msg = parsed.errors[0].error!
-    } catch { /* not JSON */ }
-    throw new Error(msg)
-  }
+  if (!r.ok) throw await msError(r, 'заказы покупателей')
   const data = await r.json() as { id: string; name?: string; meta?: { uuidHref?: string } }
   return { id: data.id, name: data.name ?? null, uuidHref: data.meta?.uuidHref ?? null }
 }
@@ -817,13 +830,7 @@ export async function createPaymentDocument(token: string, p: CreatePaymentDocPa
     body: JSON.stringify(body),
   })
   if (!r.ok) {
-    const text = await r.text().catch(() => '')
-    let msg = `HTTP ${r.status}`
-    try {
-      const parsed = JSON.parse(text) as { errors?: Array<{ error?: string }> }
-      if (parsed?.errors?.[0]?.error) msg = parsed.errors[0].error!
-    } catch { /* not JSON — fall through to status code message */ }
-    throw new Error(msg)
+    throw await msError(r, p.type === 'cashin' ? 'приходные ордера' : 'входящие платежи')
   }
   const data = await r.json() as { id: string; name?: string; meta?: { uuidHref?: string } }
   return { id: data.id, name: data.name ?? null, uuidHref: data.meta?.uuidHref ?? null }
