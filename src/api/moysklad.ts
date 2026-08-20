@@ -850,22 +850,31 @@ export async function createPaymentDocument(token: string, p: CreatePaymentDocPa
     body: JSON.stringify(b),
   })
 
-  let r = await send(body)
-  let firmSkipped = false
-  if (!r.ok) {
-    const detail = msErrorDetail(await r.text().catch(() => ''))
-    // Роли часто не дают права на доп. поле «От кого». Сам документ важнее «Фирмы»,
-    // поэтому повторяем без этого поля и сообщаем об этом наверх.
-    if (isFieldDenied(r.status, detail) && body.attributes) {
-      const retry = { ...body }
-      delete retry.attributes
-      r = await send(retry)
-      firmSkipped = true
-      if (!r.ok) throw await msError(r, what)
-    } else {
-      throw msErrorOf(r.status, detail, what)
-    }
+  // Роли часто не дают прав на отдельные поля документа: то на доп. поле «От кого»,
+  // то на комментарий. Сам документ важнее этих полей, поэтому при отказе именно
+  // по полю пробуем ещё раз, по очереди снимая необязательное.
+  const attempts: Array<Record<string, unknown>> = [body]
+  if (body.attributes) {
+    const b = { ...body }; delete b.attributes; attempts.push(b)
   }
+  if (body.description) {
+    const b = { ...attempts[attempts.length - 1] }; delete b.description; attempts.push(b)
+  }
+
+  let r = await send(attempts[0])
+  let detail = ''
+  let used = 0
+  for (let i = 1; i < attempts.length && !r.ok; i++) {
+    detail = msErrorDetail(await r.text().catch(() => ''))
+    if (!isFieldDenied(r.status, detail)) break   // отказ не по полю — повтор не поможет
+    r = await send(attempts[i])
+    used = i
+  }
+  if (!r.ok) {
+    if (!detail) detail = msErrorDetail(await r.text().catch(() => ''))
+    throw msErrorOf(r.status, detail, what)
+  }
+  const firmSkipped = used >= 1 && !!body.attributes
   const data = await r.json() as { id: string; name?: string; meta?: { uuidHref?: string } }
   return { id: data.id, name: data.name ?? null, uuidHref: data.meta?.uuidHref ?? null, firmSkipped }
 }
