@@ -26,7 +26,7 @@ interface Row {
   type: PaymentDocType         // 'cashin' | 'paymentin'
 }
 
-type RowResult = { status: 'success' | 'error'; message?: string; link?: string | null }
+type RowResult = { status: 'success' | 'error'; message?: string; link?: string | null; warning?: string }
 
 const PAYMENT_TYPES: Array<{ value: PaymentDocType; label: string }> = [
   { value: 'cashin', label: 'Наличные' },       // Приходный ордер
@@ -250,7 +250,14 @@ export default function PaymentWidgetPage() {
           // Автором в МойСклад числится токен, поэтому ФИО оформившего пишем в комментарий.
           description: userName ? `Оформил: ${userName}` : undefined,
         })
-        entries.push([row.key, { status: 'success', link: doc.uuidHref }])
+        entries.push([row.key, {
+          status: 'success',
+          link: doc.uuidHref,
+          // Документ прошёл, но «Фирму» записать не дали — сообщаем, а не молчим.
+          warning: doc.firmSkipped && firmText
+            ? 'Документ создан, но «Фирма» не сохранена: у роли нет прав на доп. поле «От кого»'
+            : undefined,
+        }])
       } catch (e) {
         entries.push([row.key, { status: 'error', message: e instanceof Error ? e.message : String(e) }])
       }
@@ -262,7 +269,9 @@ export default function PaymentWidgetPage() {
 
     if (errors === 0) {
       setRows([freshRow()])
-      setResults({})
+      // Строки очищаем, но предупреждения оставляем — иначе сотрудник не узнает,
+      // что «Фирма» не записалась.
+      setResults(Object.fromEntries(entries.filter(([, r]) => r.warning)))
       setSavedCount(entries.length)
     } else {
       setResults(res)
@@ -273,6 +282,7 @@ export default function PaymentWidgetPage() {
   // Текст первой ошибки виден сразу — раньше он прятался в подсказке и сотрудник
   // видел только слово «ошибка».
   const firstError = Object.values(results).find(r => r.status === 'error')?.message ?? null
+  const firstWarning = Object.values(results).find(r => r.warning)?.warning ?? null
 
   const gutter = GUTTER
 
@@ -481,6 +491,7 @@ export default function PaymentWidgetPage() {
             Ошибок: {errorCount}{firstError ? ` · ${firstError}` : ''}
           </span>
         )}
+        {firstWarning && <span className="text-amber-600 truncate" title={firstWarning}>{firstWarning}</span>}
         {savedCount === 0 && errorCount === 0 && (
           <span>{allCurrencies.length > 0 ? 'Готово к отправке в МойСклад' : 'Справочник валют не загружен'}</span>
         )}

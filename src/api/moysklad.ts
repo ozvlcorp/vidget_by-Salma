@@ -99,24 +99,34 @@ async function get<T>(path: string, params: Record<string, string>, token: strin
  * означает, что у сотрудника нет права на этот тип документа, — пишем прямо,
  * иначе в интерфейсе видно только «ошибка».
  */
-async function msError(r: Response, what: string): Promise<Error> {
-  const text = await r.text().catch(() => '')
-  let detail = ''
+function msErrorDetail(text: string): string {
   try {
     const parsed = JSON.parse(text) as { errors?: Array<{ error?: string }> }
-    detail = parsed?.errors?.[0]?.error ?? ''
-  } catch { /* not JSON */ }
-  if (r.status === 403) {
+    return parsed?.errors?.[0]?.error ?? ''
+  } catch { return '' }
+}
+
+/** Отказ именно по доп. полю документа, а не по самому документу. */
+function isFieldDenied(status: number, detail: string): boolean {
+  return status === 403 && /пол[ея]|field/i.test(detail)
+}
+
+async function msError(r: Response, what: string): Promise<Error> {
+  const detail = msErrorDetail(await r.text().catch(() => ''))
+  return msErrorOf(r.status, detail, what)
+}
+
+function msErrorOf(status: number, detail: string, what: string): Error {
+  if (status === 403) {
     // МойСклад различает права на сам документ и на его доп. поля: отказ по полю
     // выглядит как «нет прав на редактирование поля 'value'» — подсказываем адресно.
-    const aboutField = /пол[ея]|field/i.test(detail)
-    const hint = aboutField
+    const hint = isFieldDenied(status, detail)
       ? ' У роли сотрудника нет прав на дополнительное поле документа (у нас это «От кого», куда пишется «Фирма»).'
         + ' Дайте роли право на редактирование этого доп. поля — или оставьте «Фирму» пустой.'
       : ` Проверьте в роли сотрудника право на создание документа «${what}».`
     return new Error(`Недостаточно прав в МойСклад${detail ? `: ${detail}.` : '.'}${hint}`)
   }
-  return new Error(detail || `Ошибка МойСклад (HTTP ${r.status})`)
+  return new Error(detail || `Ошибка МойСклад (HTTP ${status})`)
 }
 
 // ─── Auth ───────────────────────────────────────────────────────────────────────
@@ -807,7 +817,11 @@ export interface CreatePaymentDocParams {
   attributes?: Array<Record<string, unknown>>
 }
 
-export interface CreatedDoc { id: string; name: string | null; uuidHref: string | null }
+export interface CreatedDoc {
+  id: string; name: string | null; uuidHref: string | null
+  /** Документ создан, но доп. поле «От кого» записать не дали (нет прав у роли). */
+  firmSkipped?: boolean
+}
 
 /** Creates one cashin (приходный ордер) or paymentin (входящий платёж) document. */
 export async function createPaymentDocument(token: string, p: CreatePaymentDocParams): Promise<CreatedDoc> {
@@ -829,14 +843,29 @@ export async function createPaymentDocument(token: string, p: CreatePaymentDocPa
     body.attributes = p.attributes
   }
 
-  const r = await msFetch(`${BASE}/entity/${p.type}`, {
+  const what = p.type === 'cashin' ? 'приходные ордера' : 'входящие платежи'
+  const send = (b: Record<string, unknown>) => msFetch(`${BASE}/entity/${p.type}`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    body: JSON.stringify(b),
   })
+
+  let r = await send(body)
+  let firmSkipped = false
   if (!r.ok) {
-    throw await msError(r, p.type === 'cashin' ? 'приходные ордера' : 'входящие платежи')
+    const detail = msErrorDetail(await r.text().catch(() => ''))
+    // Роли часто не дают права на доп. поле «От кого». Сам документ важнее «Фирмы»,
+    // поэтому повторяем без этого поля и сообщаем об этом наверх.
+    if (isFieldDenied(r.status, detail) && body.attributes) {
+      const retry = { ...body }
+      delete retry.attributes
+      r = await send(retry)
+      firmSkipped = true
+      if (!r.ok) throw await msError(r, what)
+    } else {
+      throw msErrorOf(r.status, detail, what)
+    }
   }
   const data = await r.json() as { id: string; name?: string; meta?: { uuidHref?: string } }
-  return { id: data.id, name: data.name ?? null, uuidHref: data.meta?.uuidHref ?? null }
+  return { id: data.id, name: data.name ?? null, uuidHref: data.meta?.uuidHref ?? null, firmSkipped }
 }
