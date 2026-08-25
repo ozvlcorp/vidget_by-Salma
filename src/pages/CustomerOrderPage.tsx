@@ -3,9 +3,9 @@ import { Plus, X, Loader2, Check } from 'lucide-react'
 import {
   getOrganizations, getStores, searchCounterparties, searchProducts, createCustomerOrder,
   getCurrencies, getOrderStates, getUoms, getContracts, createContract, getAllContractNames, msMoment,
-  resolveDocCurrency,
+  resolveDocCurrency, getDocAttributes, getDictValues, buildDictAttribute, buildTextAttribute,
   type NamedOption, type OrganizationOption, type StoreOption, type ProductOption,
-  type CurrencyRate, type OrderState,
+  type CurrencyRate, type OrderState, type DocAttribute, type DictOption,
 } from '../api/moysklad'
 import { useAppContext } from '../context/AppContext'
 import { GroupedNumberInput } from '../components/GroupedNumberInput'
@@ -73,6 +73,14 @@ export default function CustomerOrderPage() {
   const [states, setStates] = useState<OrderState[]>([])
   const [stateId, setStateId] = useState('')
 
+  // Доп. поле «Вид товара» — берём его из метаданных заказа, чтобы виджет
+  // подхватил поле сам, без зашитого id. Справочник → выпадающий список,
+  // строка/текст → обычный ввод.
+  const [kindAttr, setKindAttr] = useState<DocAttribute | null>(null)
+  const [kindValues, setKindValues] = useState<DictOption[]>([])
+  const [kindId, setKindId] = useState('')      // выбранный элемент справочника
+  const [kindText, setKindText] = useState('')  // значение для текстового поля
+
   // Units of measure id → name (to label шт / коробка)
   const [uomName, setUomName] = useState<Record<string, string>>({})
 
@@ -80,6 +88,8 @@ export default function CustomerOrderPage() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [okMsg, setOkMsg] = useState<string | null>(null)
+  // Заказ создан, но какое-то необязательное поле записать не дали.
+  const [warn, setWarn] = useState<string | null>(null)
 
   // Live handle to rows, so the store-change effect below can read the current
   // products without re-running on every keystroke.
@@ -105,6 +115,21 @@ export default function CustomerOrderPage() {
     getAllContractNames(token)
       .then(setAllContractNames)
       .catch(() => setAllContractNames([]))
+  }, [token])
+
+  // Доп. поле «Вид товара»: ищем по названию, затем — значения его справочника.
+  useEffect(() => {
+    let alive = true
+    getDocAttributes(token, 'customerorder')
+      .then(async attrs => {
+        const attr = attrs.find(a => /вид\s*товара/i.test(a.name)) ?? null
+        if (!alive) return
+        setKindAttr(attr)
+        const values = attr ? await getDictValues(token, 'customerorder', attr).catch(() => []) : []
+        if (alive) setKindValues(values)
+      })
+      .catch(() => { if (alive) { setKindAttr(null); setKindValues([]) } })
+    return () => { alive = false }
   }, [token])
 
   // Уведомление о созданном заказе живёт 5 секунд.
@@ -225,10 +250,11 @@ export default function CustomerOrderPage() {
 
   async function handleSubmit() {
     if (!agent) return
-    setSubmitting(true); setError(null); setOkMsg(null)
+    setSubmitting(true); setError(null); setOkMsg(null); setWarn(null)
     try {
       const state = states.find(s => s.id === stateId)
       const doc = await createCustomerOrder(token, {
+        attributes: kindAttribute(),
         organizationId: orgId,
         agentId: agent.id,
         storeId: storeId || undefined,
@@ -253,6 +279,11 @@ export default function CustomerOrderPage() {
       })
       const msg = `Заказ создан${doc.name ? ` № ${doc.name}` : ''}`
       setOkMsg(msg)
+      // Поле могло не сохраниться, если у роли нет прав именно на него —
+      // сам заказ при этом создаётся, поэтому это предупреждение, не ошибка.
+      setWarn(doc.attrSkipped && kindAttr
+        ? `Заказ создан, но «${kindAttr.name}» не сохранён: у роли нет прав на это доп. поле`
+        : null)
       setToast(msg)          // всплывающее окно, исчезнет через 5 сек
       // Reset to an empty order
       setRows([freshRow()])
@@ -263,6 +294,18 @@ export default function CustomerOrderPage() {
     } finally {
       setSubmitting(false)
     }
+  }
+
+  /** Готовая запись attributes[] для «Вида товара» — либо ничего. */
+  function kindAttribute(): Array<Record<string, unknown>> | undefined {
+    if (!kindAttr) return undefined
+    if (kindAttr.type === 'customentity') {
+      const picked = kindValues.find(v => v.id === kindId)
+      return picked ? [buildDictAttribute('customerorder', kindAttr.id, picked.meta)] : undefined
+    }
+    return kindText.trim()
+      ? [buildTextAttribute('customerorder', kindAttr.id, kindText.trim())]
+      : undefined
   }
 
   return (
@@ -354,6 +397,31 @@ export default function CustomerOrderPage() {
             </>
           )}
         </div>
+        {kindAttr && (
+          <label className="flex items-center gap-1.5 text-xs text-muted">
+            {kindAttr.name}:
+            {kindAttr.type === 'customentity' ? (
+              <select
+                value={kindId}
+                onChange={e => setKindId(e.target.value)}
+                disabled={kindValues.length === 0}
+                className={`${FIELD} max-w-[190px]`}
+              >
+                <option value="">
+                  {kindValues.length === 0 ? '— справочник пуст —' : '— не задан —'}
+                </option>
+                {kindValues.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+              </select>
+            ) : (
+              <input
+                value={kindText}
+                onChange={e => setKindText(e.target.value)}
+                placeholder="не задан"
+                className={`${FIELD} w-44`}
+              />
+            )}
+          </label>
+        )}
         <label className="flex items-center gap-1.5 text-xs text-muted">
           Валюта:
           <select value={currency} onChange={e => setCurrency(e.target.value as Cur)} className={FIELD}>
@@ -553,6 +621,7 @@ export default function CustomerOrderPage() {
         </button>
         <div className="flex-1" />
         {okMsg && <span className="text-green-600">✓ {okMsg}</span>}
+        {warn && <span className="text-amber-600">{warn}</span>}
         {error && <span className="text-red-600">Ошибка: {error}</span>}
         {!okMsg && !error && <span>Заказ покупателя · МойСклад</span>}
       </div>

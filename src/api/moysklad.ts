@@ -111,18 +111,13 @@ function isFieldDenied(status: number, detail: string): boolean {
   return status === 403 && /пол[ея]|field/i.test(detail)
 }
 
-async function msError(r: Response, what: string): Promise<Error> {
-  const detail = msErrorDetail(await r.text().catch(() => ''))
-  return msErrorOf(r.status, detail, what)
-}
-
 function msErrorOf(status: number, detail: string, what: string): Error {
   if (status === 403) {
     // МойСклад различает права на сам документ и на его доп. поля: отказ по полю
     // выглядит как «нет прав на редактирование поля 'value'» — подсказываем адресно.
     const hint = isFieldDenied(status, detail)
-      ? ' У роли сотрудника нет прав на дополнительное поле документа (у нас это «От кого», куда пишется «Фирма»).'
-        + ' Дайте роли право на редактирование этого доп. поля — или оставьте «Фирму» пустой.'
+      ? ' У роли сотрудника нет прав на дополнительное поле документа (виджет пишет «От кого» и «Вид товара»).'
+        + ' Дайте роли право на редактирование этого доп. поля — или оставьте его пустым.'
       : ` Проверьте в роли сотрудника право на создание документа «${what}».`
     return new Error(`Недостаточно прав в МойСклад${detail ? `: ${detail}.` : '.'}${hint}`)
   }
@@ -647,6 +642,8 @@ export interface CreateOrderParams {
   contractId?: string      // договор (optional)
   /** Комментарий к документу — сюда пишем ФИО сотрудника, оформившего его. */
   description?: string
+  /** Готовые записи attributes[] — доп. поля документа (напр. «Вид товара»). */
+  attributes?: Array<Record<string, unknown>>
   positions: OrderPositionInput[]
 }
 
@@ -673,23 +670,54 @@ export async function createCustomerOrder(token: string, p: CreateOrderParams): 
   if (p.contractId) body.contract = msRef('contract', p.contractId)
   if (p.description) body.description = p.description
   if (p.stateMeta) body.state = { meta: p.stateMeta }
+  if (p.attributes && p.attributes.length) body.attributes = p.attributes
   if (p.currencyId) {
     body.rate = p.rateValue != null && p.rateValue > 0
       ? { currency: msRef('currency', p.currencyId), value: p.rateValue }
       : { currency: msRef('currency', p.currencyId) }
   }
 
-  const r = await msFetch(`${BASE}/entity/customerorder`, {
+  const send = (b: Record<string, unknown>) => msFetch(`${BASE}/entity/customerorder`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    body: JSON.stringify(b),
   })
-  if (!r.ok) throw await msError(r, 'заказы покупателей')
+
+  // Как и у платежей: роль сотрудника может не иметь прав на отдельное поле
+  // (доп. поле или комментарий). Сам заказ важнее — при отказе именно по полю
+  // повторяем попытку, по очереди снимая необязательное.
+  const attempts: Array<Record<string, unknown>> = [body]
+  if (body.attributes) {
+    const b = { ...body }; delete b.attributes; attempts.push(b)
+  }
+  if (body.description) {
+    const b = { ...attempts[attempts.length - 1] }; delete b.description; attempts.push(b)
+  }
+
+  let r = await send(attempts[0])
+  let detail = ''
+  let used = 0
+  for (let i = 1; i < attempts.length && !r.ok; i++) {
+    detail = msErrorDetail(await r.text().catch(() => ''))
+    if (!isFieldDenied(r.status, detail)) break
+    r = await send(attempts[i])
+    used = i
+  }
+  if (!r.ok) {
+    if (!detail) detail = msErrorDetail(await r.text().catch(() => ''))
+    throw msErrorOf(r.status, detail, 'заказы покупателей')
+  }
   const data = await r.json() as { id: string; name?: string; meta?: { uuidHref?: string } }
-  return { id: data.id, name: data.name ?? null, uuidHref: data.meta?.uuidHref ?? null }
+  return {
+    id: data.id, name: data.name ?? null, uuidHref: data.meta?.uuidHref ?? null,
+    attrSkipped: used >= 1 && !!body.attributes,
+  }
 }
 
 export type PaymentDocType = 'cashin' | 'paymentin'
+
+/** Типы документов, у которых виджет читает/пишет доп. поля. */
+export type AttrDocType = PaymentDocType | 'customerorder'
 
 /** A custom attribute (доп. поле) defined on a document type's metadata. */
 export interface DocAttribute {
@@ -701,10 +729,10 @@ export interface DocAttribute {
 }
 
 /**
- * Custom attributes (доп. поля) declared for a cashin/paymentin document type.
- * Used to locate the "От кого" field so its value can be written on creation.
+ * Custom attributes (доп. поля) declared for a document type: "От кого" on
+ * cashin/paymentin, "Вид товара" on customerorder.
  */
-export async function getDocAttributes(token: string, type: PaymentDocType): Promise<DocAttribute[]> {
+export async function getDocAttributes(token: string, type: AttrDocType): Promise<DocAttribute[]> {
   const data = await get<{ rows: Array<{ id: string; name: string; type: string; customEntityMeta?: { href?: string } }> }>(
     `/entity/${type}/metadata/attributes`, {}, token
   ).catch(() => ({ rows: [] as Array<{ id: string; name: string; type: string; customEntityMeta?: { href?: string } }> }))
@@ -769,7 +797,7 @@ async function findOrCreateCustomEntity(
  * a dictionary element and reference it. Other object types are unsupported.
  */
 export async function buildFromWhomAttribute(
-  token: string, type: PaymentDocType, attr: DocAttribute, text: string
+  token: string, type: AttrDocType, attr: DocAttribute, text: string
 ): Promise<Record<string, unknown>> {
   const meta = {
     href: `${MS_API_ROOT}/entity/${type}/metadata/attributes/${attr.id}`,
@@ -780,19 +808,62 @@ export async function buildFromWhomAttribute(
     return { meta, value: text }
   }
   if (attr.type === 'customentity') {
-    // The list metadata sometimes omits customEntityMeta — fetch the single
-    // attribute's metadata as a fallback to get the dictionary href.
-    let href = attr.customEntityHref
-    if (!href) {
-      const one = await get<{ customEntityMeta?: { href?: string } }>(
-        `/entity/${type}/metadata/attributes/${attr.id}`, {}, token
-      ).catch(() => null)
-      href = one?.customEntityMeta?.href ?? null
-    }
-    const elMeta = await findOrCreateCustomEntity(token, href, text)
+    const elMeta = await findOrCreateCustomEntity(token, await dictHrefOf(token, type, attr), text)
     return { meta, value: { meta: elMeta } }
   }
   throw new Error(`Тип доп. поля «${attr.name}» (${attr.type}) не поддерживается — сделайте его текстовым`)
+}
+
+/**
+ * Ссылка на справочник доп. поля. Список метаданных иногда отдаёт поле без
+ * customEntityMeta, поэтому при нужде дочитываем метаданные самого поля.
+ */
+async function dictHrefOf(token: string, type: AttrDocType, attr: DocAttribute): Promise<string | null> {
+  if (attr.customEntityHref) return attr.customEntityHref
+  const one = await get<{ customEntityMeta?: { href?: string } }>(
+    `/entity/${type}/metadata/attributes/${attr.id}`, {}, token
+  ).catch(() => null)
+  return one?.customEntityMeta?.href ?? null
+}
+
+/** Элемент справочника вместе с его meta — meta нужна, чтобы записать значение. */
+export interface DictOption { id: string; name: string; meta: Record<string, unknown> }
+
+/**
+ * Все значения справочника доп. поля — для выпадающего списка (например
+ * «Вид товара» у заказа покупателя). Пусто, если поле не справочник.
+ */
+export async function getDictValues(token: string, type: AttrDocType, attr: DocAttribute): Promise<DictOption[]> {
+  if (attr.type !== 'customentity') return []
+  const dictId = (await dictHrefOf(token, type, attr))?.match(UUID_RE)?.pop()
+  if (!dictId) return []
+  type Row = { id: string; name: string; meta?: Record<string, unknown> }
+  const data = await get<{ rows?: Row[] }>(
+    `/entity/customentity/${dictId}`, { limit: '1000' }, token
+  ).catch(() => ({ rows: [] as Row[] }))
+  return (data.rows ?? []).flatMap(r => (r.meta ? [{ id: r.id, name: r.name, meta: r.meta }] : []))
+}
+
+/** Запись attributes[] со ссылкой на выбранный элемент справочника. */
+export function buildDictAttribute(
+  type: AttrDocType, attrId: string, elementMeta: Record<string, unknown>
+): Record<string, unknown> {
+  return { meta: attrMeta(type, attrId), value: { meta: elementMeta } }
+}
+
+/** Запись attributes[] с текстовым значением (для доп. полей типа строка/текст). */
+export function buildTextAttribute(
+  type: AttrDocType, attrId: string, text: string
+): Record<string, unknown> {
+  return { meta: attrMeta(type, attrId), value: text }
+}
+
+function attrMeta(type: AttrDocType, attrId: string) {
+  return {
+    href: `${MS_API_ROOT}/entity/${type}/metadata/attributes/${attrId}`,
+    type: 'attributemetadata',
+    mediaType: 'application/json',
+  }
 }
 
 export interface CreatePaymentDocParams {
@@ -821,6 +892,8 @@ export interface CreatedDoc {
   id: string; name: string | null; uuidHref: string | null
   /** Документ создан, но доп. поле «От кого» записать не дали (нет прав у роли). */
   firmSkipped?: boolean
+  /** Документ создан, но доп. поле документа записать не дали (нет прав у роли). */
+  attrSkipped?: boolean
 }
 
 /** Creates one cashin (приходный ордер) or paymentin (входящий платёж) document. */
