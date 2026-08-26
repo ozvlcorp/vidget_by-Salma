@@ -26,6 +26,18 @@ interface Pos {
   pricePerLiter: number // «Цена за литр (доллар)» — из доп. поля товара, редактируемая
 }
 
+// Статусы новой заявки: только эти два, «Новый заказ» — по умолчанию.
+// Порядок в списке — как здесь.
+// `\w` в JS — только латиница, поэтому по кириллице сопоставляем через `.`
+const NEW_ORDER_STATES = [/нов.*заказ/i, /черновик/i]
+
+/** Отбирает разрешённые статусы в заданном порядке. Пусто → в аккаунте их нет. */
+function pickOrderStates(all: OrderState[]): OrderState[] {
+  return NEW_ORDER_STATES
+    .map(re => all.find(s => re.test(s.name)))
+    .filter((s): s is OrderState => !!s)
+}
+
 // Ширины столбцов (тянутся мышкой за границу в шапке):
 // товар · количество · остаток · ед.изм · объём · цена за литр · сумма
 const DEFAULT_COL_WIDTHS = [420, 104, 110, 132, 116, 140, 150]
@@ -72,6 +84,8 @@ export default function CustomerOrderPage() {
   // Status (Статус)
   const [states, setStates] = useState<OrderState[]>([])
   const [stateId, setStateId] = useState('')
+  // Статус новой заявки — к нему форма возвращается после создания заказа.
+  const [defaultStateId, setDefaultStateId] = useState('')
 
   // Доп. поле «Вид товара» — берём его из метаданных заказа, чтобы виджет
   // подхватил поле сам, без зашитого id. Справочник → выпадающий список,
@@ -107,7 +121,14 @@ export default function CustomerOrderPage() {
       .then(setAllCurrencies)
       .catch(() => setAllCurrencies([]))
     getOrderStates(token)
-      .then(setStates)
+      .then(all => {
+        // Обычно оставляем «Новый заказ» и «Черновик», первый — по умолчанию.
+        // Если их в аккаунте нет (переименовали), показываем все и не выбираем.
+        const allowed = pickOrderStates(all)
+        setStates(allowed.length ? allowed : all)
+        setDefaultStateId(allowed[0]?.id ?? '')
+        if (allowed.length) setStateId(prev => prev || allowed[0].id)
+      })
       .catch(() => setStates([]))
     getUoms(token)
       .then(us => setUomName(Object.fromEntries(us.map(u => [u.id, u.name]))))
@@ -289,6 +310,7 @@ export default function CustomerOrderPage() {
       setRows([freshRow()])
       setAgent(null)
       setContractId('')
+      setStateId(defaultStateId)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -454,7 +476,10 @@ export default function CustomerOrderPage() {
                 ? { color: selectedState.color, borderColor: selectedState.color, fontWeight: 600 }
                 : undefined}
             >
-              <option value="" style={{ color: 'inherit', fontWeight: 400 }}>— не задан —</option>
+              {/* Пустой вариант нужен, только когда статус по умолчанию не найден */}
+              {!stateId && (
+                <option value="" style={{ color: 'inherit', fontWeight: 400 }}>— не задан —</option>
+              )}
               {states.map(s => (
                 <option key={s.id} value={s.id} style={{ color: s.color, fontWeight: 600 }}>{s.name}</option>
               ))}
