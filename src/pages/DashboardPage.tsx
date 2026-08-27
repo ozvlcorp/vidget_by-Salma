@@ -4,7 +4,7 @@ import { getSalesOrders, getCurrencies, type SalesOrder, type CurrencyRate } fro
 import { useAppContext } from '../context/AppContext'
 import { HeadCell, GUTTER, todayStr, fmtMoney } from '../components/grid'
 
-const FIELD = 'h-8 px-2 rounded-md border border-line bg-surface text-fg text-xs'
+const FIELD = 'h-9 lg:h-8 px-2 rounded-md border border-line bg-surface text-fg text-xs'
 
 /** Первый день текущего месяца в формате YYYY-MM-DD. */
 function monthStart(): string {
@@ -24,6 +24,77 @@ const PERIODS = [
 ] as const
 
 const fmtNum = (n: number) => n.toLocaleString('ru-RU', { maximumFractionDigits: 2 })
+
+const AGENT_COLS = '44px minmax(220px, 1fr) 90px 130px 120px 150px'
+
+interface SummaryRow { name: string; orders: number; liters: number; boxes: number; sum: number }
+
+/**
+ * Одна сводка: на широком экране — таблица, на телефоне — карточки, потому что
+ * шесть столбцов в 375 точек не помещаются даже мелким шрифтом.
+ */
+function Summary({
+  title, nameLabel, curLabel, rows, empty, className = 'pb-3',
+}: {
+  title: string
+  nameLabel: string
+  curLabel: string
+  rows: SummaryRow[]
+  empty: string
+  className?: string
+}) {
+  return (
+    <div className={`px-3 ${className}`}>
+      <h2 className="mb-2 text-xs font-bold uppercase tracking-wide text-muted">{title}</h2>
+
+      {/* Телефон и планшет */}
+      <div className="lg:hidden space-y-2">
+        {rows.length === 0 ? (
+          <div className="rounded-xl border border-line bg-surface px-4 py-6 text-center text-sm text-faint">{empty}</div>
+        ) : rows.map((r, i) => (
+          <div key={r.name} className="rounded-xl border border-line bg-surface p-3">
+            <div className="flex items-baseline gap-2">
+              <span className="font-mono text-xs text-faint">{i + 1}</span>
+              <span className="min-w-0 flex-1 truncate text-sm font-medium text-fg">{r.name}</span>
+              <span className="font-mono text-sm font-bold tabular-nums text-fg">
+                {fmtMoney(r.sum)} {curLabel}
+              </span>
+            </div>
+            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
+              <span className="tabular-nums">Литров: <span className="text-fg">{fmtNum(r.liters)}</span></span>
+              <span className="tabular-nums">Коробок: <span className="text-fg">{fmtNum(r.boxes)}</span></span>
+              <span className="tabular-nums">Заказов: <span className="text-fg">{r.orders}</span></span>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Широкий экран */}
+      <div className="hidden lg:block rounded-xl border border-line overflow-hidden">
+        <div className="grid bg-surface-2 border-b border-line" style={{ gridTemplateColumns: AGENT_COLS }}>
+          <div className={GUTTER} />
+          <HeadCell label={nameLabel} />
+          <HeadCell label="Заказов" className="text-right" />
+          <HeadCell label="Литров" className="text-right" />
+          <HeadCell label="Коробок" className="text-right" />
+          <HeadCell label={`Сумма, ${curLabel}`} className="text-right" />
+        </div>
+        {rows.length === 0 ? (
+          <div className="bg-surface px-4 py-6 text-center text-sm text-faint">{empty}</div>
+        ) : rows.map((r, i) => (
+          <div key={r.name} className="grid border-b border-line last:border-b-0 bg-surface" style={{ gridTemplateColumns: AGENT_COLS }}>
+            <div className={GUTTER}>{i + 1}</div>
+            <div className="px-2.5 py-2 text-sm border-r border-line truncate" title={r.name}>{r.name}</div>
+            <div className="px-2.5 py-2 text-sm text-right font-mono tabular-nums border-r border-line">{r.orders}</div>
+            <div className="px-2.5 py-2 text-sm text-right font-mono tabular-nums border-r border-line">{fmtNum(r.liters)} л</div>
+            <div className="px-2.5 py-2 text-sm text-right font-mono tabular-nums border-r border-line">{fmtNum(r.boxes)}</div>
+            <div className="px-2.5 py-2 text-sm text-right font-mono tabular-nums">{fmtMoney(r.sum)}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
 
 export default function DashboardPage() {
   const { token, userName } = useAppContext()
@@ -93,29 +164,28 @@ export default function DashboardPage() {
     return [...map.values()].sort((a, b) => b.liters - a.liters)
   }, [rows, toView])
 
-  const AGENT_COLS = '44px minmax(220px, 1fr) 90px 130px 120px 150px'
 
   return (
     <div className="h-full flex flex-col overflow-hidden bg-base text-fg">
       {/* Панель периода */}
-      <div className="shrink-0 border-b border-line bg-surface px-3 py-2 flex flex-wrap items-center gap-x-3 gap-y-2">
+      <div className="shrink-0 border-b border-line bg-surface px-3 py-2 flex flex-wrap items-center gap-x-3 gap-y-2 overflow-x-hidden">
         {PERIODS.map(p => (
           <button
             key={p.id}
             type="button"
             onClick={() => { setFrom(p.from()); setTo(todayStr()) }}
-            className="h-8 px-3 rounded-md border border-line text-xs text-muted hover:text-accent hover:border-accent transition-colors"
+            className="h-9 lg:h-8 flex-1 lg:flex-none px-3 rounded-md border border-line text-xs text-muted hover:text-accent hover:border-accent transition-colors"
           >
             {p.label}
           </button>
         ))}
-        <label className="flex items-center gap-1.5 text-xs text-muted">
+        <label className="flex flex-1 lg:flex-none items-center gap-1.5 text-xs text-muted">
           с
-          <input type="date" value={from} onChange={e => setFrom(e.target.value)} className={`${FIELD} font-mono`} />
+          <input type="date" value={from} onChange={e => setFrom(e.target.value)} className={`${FIELD} min-w-0 flex-1 lg:flex-none font-mono`} />
         </label>
-        <label className="flex items-center gap-1.5 text-xs text-muted">
+        <label className="flex flex-1 lg:flex-none items-center gap-1.5 text-xs text-muted">
           по
-          <input type="date" value={to} onChange={e => setTo(e.target.value)} className={`${FIELD} font-mono`} />
+          <input type="date" value={to} onChange={e => setTo(e.target.value)} className={`${FIELD} min-w-0 flex-1 lg:flex-none font-mono`} />
         </label>
         <label className="flex items-center gap-1.5 text-xs text-muted cursor-pointer">
           <input type="checkbox" checked={onlyMine} onChange={e => setOnlyMine(e.target.checked)} className="accent-accent" />
@@ -127,7 +197,7 @@ export default function DashboardPage() {
               key={c}
               type="button"
               onClick={() => setView(c)}
-              className={`h-8 px-3 text-xs transition-colors ${
+              className={`h-9 lg:h-8 px-4 lg:px-3 text-xs transition-colors ${
                 view === c ? 'bg-accent text-white' : 'text-muted hover:text-fg'
               }`}
             >
@@ -139,7 +209,7 @@ export default function DashboardPage() {
           type="button"
           onClick={() => setReloadKey(k => k + 1)}
           title="Обновить"
-          className="w-8 h-8 rounded-md border border-line flex items-center justify-center text-muted hover:text-accent hover:border-accent transition-colors"
+          className="w-9 h-9 lg:w-8 lg:h-8 shrink-0 rounded-md border border-line flex items-center justify-center text-muted hover:text-accent hover:border-accent transition-colors"
         >
           <RefreshCw size={14} />
         </button>
@@ -149,7 +219,7 @@ export default function DashboardPage() {
 
       <div className="flex-1 overflow-auto">
         {/* Итоги */}
-        <div className="grid gap-3 p-3" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' }}>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 p-3">
           {[
             { label: 'Продано литров', value: `${fmtNum(total.liters)} л` },
             { label: 'Продано коробок', value: fmtNum(total.boxes) },
@@ -158,70 +228,42 @@ export default function DashboardPage() {
           ].map(card => (
             <div key={card.label} className="rounded-xl border border-line bg-surface px-4 py-3">
               <p className="text-[11px] uppercase tracking-wide text-muted">{card.label}</p>
-              <p className="mt-1 text-2xl font-bold tabular-nums text-fg">{card.value}</p>
+              <p className="mt-1 text-xl lg:text-2xl font-bold tabular-nums text-fg break-words">{card.value}</p>
             </div>
           ))}
         </div>
 
         {/* Кому продали */}
-        <div className="px-3 pb-3">
-          <h2 className="mb-2 text-xs font-bold uppercase tracking-wide text-muted">Кому продали</h2>
-          <div className="rounded-xl border border-line overflow-hidden">
-            <div className="grid bg-surface-2 border-b border-line" style={{ gridTemplateColumns: AGENT_COLS }}>
-              <div className={GUTTER} />
-              <HeadCell label="Контрагент" />
-              <HeadCell label="Заказов" className="text-right" />
-              <HeadCell label="Литров" className="text-right" />
-              <HeadCell label="Коробок" className="text-right" />
-              <HeadCell label={`Сумма, ${curLabel}`} className="text-right" />
-            </div>
-            {byAgent.length === 0 ? (
-              <div className="bg-surface px-4 py-6 text-center text-sm text-faint">
-                {orders === null ? 'Загрузка…' : 'За период продаж нет'}
-              </div>
-            ) : byAgent.map((a, i) => (
-              <div key={a.agent} className="grid border-b border-line last:border-b-0 bg-surface" style={{ gridTemplateColumns: AGENT_COLS }}>
-                <div className={GUTTER}>{i + 1}</div>
-                <div className="px-2.5 py-2 text-sm border-r border-line truncate" title={a.agent}>{a.agent}</div>
-                <div className="px-2.5 py-2 text-sm text-right font-mono tabular-nums border-r border-line">{a.orders}</div>
-                <div className="px-2.5 py-2 text-sm text-right font-mono tabular-nums border-r border-line">{fmtNum(a.liters)} л</div>
-                <div className="px-2.5 py-2 text-sm text-right font-mono tabular-nums border-r border-line">{fmtNum(a.boxes)}</div>
-                <div className="px-2.5 py-2 text-sm text-right font-mono tabular-nums">{fmtMoney(a.sum)}</div>
-              </div>
-            ))}
-          </div>
-        </div>
+        <Summary
+          title="Кому продали"
+          nameLabel="Контрагент"
+          curLabel={curLabel}
+          rows={byAgent.map(a => ({ name: a.agent, orders: a.orders, liters: a.liters, boxes: a.boxes, sum: a.sum }))}
+          empty={orders === null ? 'Загрузка…' : 'За период продаж нет'}
+        />
 
         {/* Кто продал — при просмотре всех сотрудников */}
         {!onlyMine && byEmployee.length > 0 && (
-          <div className="px-3 pb-6">
-            <h2 className="mb-2 text-xs font-bold uppercase tracking-wide text-muted">Кто продал</h2>
-            <div className="rounded-xl border border-line overflow-hidden">
-              <div className="grid bg-surface-2 border-b border-line" style={{ gridTemplateColumns: AGENT_COLS }}>
-                <div className={GUTTER} />
-                <HeadCell label="Сотрудник" />
-                <HeadCell label="Заказов" className="text-right" />
-                <HeadCell label="Литров" className="text-right" />
-                <HeadCell label="Коробок" className="text-right" />
-                <HeadCell label={`Сумма, ${curLabel}`} className="text-right" />
-              </div>
-              {byEmployee.map((e, i) => (
-                <div key={e.employee} className="grid border-b border-line last:border-b-0 bg-surface" style={{ gridTemplateColumns: AGENT_COLS }}>
-                  <div className={GUTTER}>{i + 1}</div>
-                  <div className="px-2.5 py-2 text-sm border-r border-line truncate" title={e.employee}>{e.employee}</div>
-                  <div className="px-2.5 py-2 text-sm text-right font-mono tabular-nums border-r border-line">{e.orders}</div>
-                  <div className="px-2.5 py-2 text-sm text-right font-mono tabular-nums border-r border-line">{fmtNum(e.liters)} л</div>
-                  <div className="px-2.5 py-2 text-sm text-right font-mono tabular-nums border-r border-line">{fmtNum(e.boxes)}</div>
-                  <div className="px-2.5 py-2 text-sm text-right font-mono tabular-nums">{fmtMoney(e.sum)}</div>
-                </div>
-              ))}
-            </div>
-          </div>
+          <Summary
+            title="Кто продал"
+            nameLabel="Сотрудник"
+            curLabel={curLabel}
+            rows={byEmployee.map(e => ({ name: e.employee, orders: e.orders, liters: e.liters, boxes: e.boxes, sum: e.sum }))}
+            empty=""
+            className="pb-6"
+          />
         )}
       </div>
 
-      {/* Статус-строка */}
-      <div className="shrink-0 h-7 flex items-center gap-4 px-3 border-t border-line bg-surface-2 text-[11px] text-faint">
+      {/* Телефон: из статус-строки нужна только ошибка */}
+      {error && (
+        <div className="lg:hidden shrink-0 border-t border-line bg-surface px-3 py-2 text-xs text-red-600">
+          Ошибка: {error}
+        </div>
+      )}
+
+      {/* Статус-строка (широкий экран) */}
+      <div className="hidden lg:flex shrink-0 h-7 items-center gap-4 px-3 border-t border-line bg-surface-2 text-[11px] text-faint">
         <span>{onlyMine ? `Мои продажи${userName ? ` · ${userName}` : ''}` : 'Продажи всех сотрудников'}</span>
         <div className="flex-1" />
         {error && <span className="text-red-600">Ошибка: {error}</span>}

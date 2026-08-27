@@ -43,7 +43,24 @@
 
   /* Root scale — Roboto reads at a normal width, so a light bump is plenty */
   html { font-size: 104%; }
+  /* На телефоне лишний масштаб только съедает ширину */
+  @media (max-width: 767px) { html { font-size: 100%; } }
   html, body { height: 100%; overflow-y: auto; }
+
+  /* Телефон: не даём странице ездить по горизонтали и мигать серым при тапе */
+  @media (max-width: 767px) {
+    html, body { overflow-x: hidden; overscroll-behavior-y: none; }
+  }
+  body { -webkit-tap-highlight-color: transparent; }
+
+  /*
+   * Сенсорный ввод: Safari на iPhone сам увеличивает страницу, если шрифт поля
+   * меньше 16px, и вернуть масштаб пальцем потом неудобно. Поэтому на тач-экранах
+   * поля набираются шрифтом 16px — виджет остаётся на месте при вводе.
+   */
+  @media (pointer: coarse) {
+    input, select, textarea { font-size: 16px; }
+  }
 
   body {
     @apply bg-base text-fg antialiased;
@@ -117,3 +134,11 @@ button:disabled:active { transform: none; }
 }
 .animate-fade-up { animation: fadeUp var(--dur-long) var(--ease-emph-decel) forwards; }
 .animate-fade-in { animation: fadeIn var(--dur-medium) var(--ease-standard) forwards; }
+
+/* ─── Безопасные зоны iPhone/Android ────────────────────────────────────────── */
+/* Нижняя панель навигации не должна попадать под «домашнюю полоску». */
+.pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
+.pt-safe { padding-top: env(safe-area-inset-top, 0px); }
+
+/* Высота экрана без адресной строки браузера (Safari/Chrome на телефоне). */
+.app-vh { height: 100vh; height: 100dvh; }

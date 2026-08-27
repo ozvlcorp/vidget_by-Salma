@@ -1,6 +1,6 @@
 /* eslint-disable react-refresh/only-export-components -- shared grid helpers + cells live together */
 import { useState, useRef, useEffect } from 'react'
-import type { ChangeEvent, PointerEvent as ReactPointerEvent } from 'react'
+import type { ChangeEvent, CSSProperties, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import type { NamedOption } from '../api/moysklad'
 
@@ -42,6 +42,36 @@ export function HeadCell({
           className="absolute top-0 -right-1 z-30 h-full w-2 cursor-col-resize hover:bg-accent/50 active:bg-accent transition-colors"
         />
       )}
+    </div>
+  )
+}
+
+// ─── Мобильные карточки ──────────────────────────────────────────────────────
+// На телефоне таблица не помещается, поэтому строка рисуется карточкой: подпись
+// сверху, редактор снизу. Эти два блока — общий словарь для таких карточек.
+
+/** Редактируемое поле карточки: подпись сверху, редактор в рамке. */
+export function MField({
+  label, children, className = '',
+}: { label: string; children: ReactNode; className?: string }) {
+  return (
+    <label className={`block min-w-0 ${className}`}>
+      <span className="mb-1 block text-[11px] uppercase tracking-wide text-muted">{label}</span>
+      <div className="rounded-lg border border-line bg-surface focus-within:ring-2 focus-within:ring-accent focus-within:ring-inset">
+        {children}
+      </div>
+    </label>
+  )
+}
+
+/** Показатель карточки — только чтение. */
+export function MStat({
+  label, value, valueClassName = '',
+}: { label: string; value: string; valueClassName?: string }) {
+  return (
+    <div className="min-w-0">
+      <span className="mb-1 block text-[11px] uppercase tracking-wide text-muted">{label}</span>
+      <p className={`truncate px-1 py-2 font-mono text-sm tabular-nums ${valueClassName || 'text-fg'}`}>{value}</p>
     </div>
   )
 }
@@ -109,6 +139,17 @@ export function useColumnWidths(storageKey: string, initial: number[]) {
   return { widths, startResize, resetWidths: () => setWidths(initial) }
 }
 
+/**
+ * Позиция выпадающего меню под полем. На телефоне поле бывает у самого края,
+ * поэтому меню прижимается к экрану, а не уезжает за него.
+ */
+export function menuStyle(rect: DOMRect, minWidth: number): CSSProperties {
+  const margin = 8
+  const width = Math.min(Math.max(rect.width, minWidth), window.innerWidth - margin * 2)
+  const left = Math.min(Math.max(margin, rect.left), window.innerWidth - width - margin)
+  return { position: 'fixed', top: rect.bottom + 2, left, width }
+}
+
 // ─── Searchable dropdown cell (portal so it never gets clipped by the table) ──
 // Generic over the option type so callers can carry extra fields (e.g. a product's
 // price) while still displaying { id, name }.
@@ -130,6 +171,16 @@ export function SearchCell<T extends NamedOption>({
 }) {
   const [query, setQuery] = useState(value?.name ?? '')
   const [open, setOpen] = useState(false)
+  // Одна и та же строка рисуется и таблицей, и карточкой (для телефона), поэтому
+  // выбор в одном экземпляре должен стать виден во втором — например при повороте
+  // планшета. Правка состояния прямо в рендере — штатный приём React для такой
+  // синхронизации с пропсом. Пустое значение не трогаем: пока идёт набор, value
+  // как раз null, и подставлять туда нечего.
+  const [seenValueName, setSeenValueName] = useState(value?.name ?? '')
+  if ((value?.name ?? '') !== seenValueName) {
+    setSeenValueName(value?.name ?? '')
+    if (value) setQuery(value.name)
+  }
   const [items, setItems] = useState<T[]>([])
   const [loading, setLoading] = useState(false)
   const [rect, setRect] = useState<DOMRect | null>(null)
@@ -167,6 +218,7 @@ export function SearchCell<T extends NamedOption>({
     setOpen(false)
   }
 
+
   useEffect(() => {
     if (!open) return
     function onDocDown(e: MouseEvent) {
@@ -200,7 +252,7 @@ export function SearchCell<T extends NamedOption>({
       {open && rect && (!hideEmpty || items.length > 0) && createPortal(
         <div
           data-search-menu
-          style={{ position: 'fixed', top: rect.bottom + 2, left: rect.left, width: Math.max(rect.width, 200) }}
+          style={menuStyle(rect, 200)}
           className="z-[1000] max-h-60 overflow-y-auto overscroll-contain rounded-md border border-line bg-surface shadow-xl"
         >
           {/* hideEmpty guarantees items.length > 0 here, so skip the loading/empty rows */}

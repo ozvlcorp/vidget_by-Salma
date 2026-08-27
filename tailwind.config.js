@@ -6,6 +6,9 @@ export default {
     extend: {
       colors: {
         // Semantic, theme-aware tokens (RGB triplets in index.css → opacity modifiers work)
+        // ВНИМАНИЕ: из-за цвета `base` класс `text-base` означает не размер шрифта,
+        // а цвет фона — текст становится невидимым. Для размера пишите `text-sm`,
+        // `text-lg` или `text-[17px]`.
         base:           'rgb(var(--bg) / <alpha-value>)',
         surface:        'rgb(var(--surface) / <alpha-value>)',
         'surface-2':    'rgb(var(--surface-2) / <alpha-value>)',

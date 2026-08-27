@@ -176,11 +176,14 @@ function Shell() {
   }
   const label = (text: string) => (expanded ? <span className="truncate">{text}</span> : null)
 
+  const current = SECTIONS.find(s => s.id === section)
+
   return (
-    <div className="h-screen flex overflow-hidden bg-base">
-      {/* Боковое меню: сворачивается до иконок по клику */}
+    <div className="app-vh flex overflow-hidden bg-base">
+      {/* Боковое меню (планшет и десктоп): сворачивается до иконок по клику.
+          На телефоне вместо него — верхняя шапка и нижние вкладки. */}
       <nav
-        className={`shrink-0 flex flex-col border-r border-line bg-surface-2 transition-[width] duration-200 ease-out ${
+        className={`hidden md:flex shrink-0 flex-col border-r border-line bg-surface-2 transition-[width] duration-200 ease-out ${
           expanded ? 'w-56' : 'w-14'
         }`}
       >
@@ -245,10 +248,58 @@ function Shell() {
         </div>
       </nav>
 
-      <div className="flex-1 overflow-hidden">
-        {section === 'payment' ? <PaymentWidgetPage />
-          : section === 'order' ? <CustomerOrderPage />
-          : <DashboardPage />}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Телефон: шапка с названием раздела, темой и выходом */}
+        <header className="md:hidden shrink-0 pt-safe border-b border-line bg-surface">
+          <div className="h-12 flex items-center gap-2 px-3">
+            {current && <current.Icon size={18} className="shrink-0 text-accent" />}
+            <span className="flex-1 truncate text-sm font-semibold text-fg">{current?.label}</span>
+            {/* На узком экране имя уступает место названию раздела */}
+            {userName && <span className="hidden sm:block max-w-[38%] truncate text-[11px] text-muted">{userName}</span>}
+            <button
+              type="button"
+              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+              aria-label="Переключить тему"
+              className="w-9 h-9 shrink-0 rounded-lg flex items-center justify-center text-muted active:bg-surface-3"
+            >
+              {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+            </button>
+            <button
+              type="button"
+              onClick={logout}
+              aria-label="Выйти"
+              className="w-9 h-9 shrink-0 rounded-lg flex items-center justify-center text-muted active:bg-surface-3"
+            >
+              <LogOut size={18} />
+            </button>
+          </div>
+        </header>
+
+        <div className="flex-1 overflow-hidden">
+          {section === 'payment' ? <PaymentWidgetPage />
+            : section === 'order' ? <CustomerOrderPage />
+            : <DashboardPage />}
+        </div>
+
+        {/* Телефон: вкладки внизу — большая зона нажатия под большой палец */}
+        <nav className="md:hidden shrink-0 border-t border-line bg-surface pb-safe">
+          <div className="flex">
+            {SECTIONS.map(({ id, label, Icon }) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setSection(id)}
+                aria-current={section === id ? 'page' : undefined}
+                className={`flex-1 h-14 flex flex-col items-center justify-center gap-0.5 text-[11px] font-medium transition-colors ${
+                  section === id ? 'text-accent' : 'text-muted'
+                }`}
+              >
+                <Icon size={20} className="shrink-0" />
+                <span className="truncate max-w-full px-1">{label}</span>
+              </button>
+            ))}
+          </div>
+        </nav>
       </div>
     </div>
   )

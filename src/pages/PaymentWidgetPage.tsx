@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import type { ChangeEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { Plus, X, Loader2 } from 'lucide-react'
+import { Plus, X, Loader2, Trash2 } from 'lucide-react'
 import {
   searchCounterparties, getOrganizations, createPaymentDocument, getCurrencies,
   getDocAttributes, buildFromWhomAttribute, searchFromWhomValues, msMoment, resolveDocCurrency,
@@ -10,7 +10,7 @@ import {
 import { useAppContext } from '../context/AppContext'
 import { ThemeToggle } from '../components/ThemeToggle'
 import { GroupedNumberInput } from '../components/GroupedNumberInput'
-import { CELL, CELLBOX, GUTTER, HeadCell, SearchCell, todayStr, fmtMoney, useColumnWidths } from '../components/grid'
+import { CELL, CELLBOX, GUTTER, HeadCell, MField, MStat, SearchCell, menuStyle, todayStr, fmtMoney, useColumnWidths } from '../components/grid'
 
 // ─── Table model ────────────────────────────────────────────────────────────
 type Cur = 'UZS' | 'USD'   // сум или доллар
@@ -116,7 +116,7 @@ function FirmCell({
       {open && rect && (loading || items.length > 0) && createPortal(
         <div
           data-firm-menu
-          style={{ position: 'fixed', top: rect.bottom + 2, left: rect.left, width: Math.max(rect.width, 220) }}
+          style={menuStyle(rect, 220)}
           className="z-[1000] max-h-60 overflow-y-auto overscroll-contain rounded-md border border-line bg-surface shadow-xl"
         >
           {loading ? (
@@ -289,11 +289,12 @@ export default function PaymentWidgetPage() {
   return (
     <div className="h-full flex flex-col overflow-hidden bg-base text-fg">
       {/* Toolbar */}
-      <div className="shrink-0 h-12 flex items-center gap-2 px-3 border-b border-line bg-surface">
-        <span className="font-bold text-sm tracking-tight">Разбивка платежа</span>
-        <div className="flex-1" />
+      <div className="shrink-0 flex flex-wrap items-center gap-2 px-3 py-2 lg:h-12 lg:flex-nowrap lg:py-0 border-b border-line bg-surface">
+        {/* Название раздела на телефоне уже стоит в шапке приложения */}
+        <span className="hidden lg:inline font-bold text-sm tracking-tight">Разбивка платежа</span>
+        <div className="hidden lg:block flex-1" />
         {/* Юр. лицо (organization) — applied to every created document */}
-        <label className="hidden sm:flex items-center gap-1.5 text-xs text-muted">
+        <label className="flex w-full lg:w-auto items-center justify-between lg:justify-start gap-2 text-xs text-muted">
           Юр. лицо:
           {organizations === null ? (
             <span className="text-faint">загрузка…</span>
@@ -303,7 +304,7 @@ export default function PaymentWidgetPage() {
             <select
               value={orgId}
               onChange={e => setOrgId(e.target.value)}
-              className="h-8 max-w-[220px] px-2 rounded-md border border-line bg-surface text-fg text-xs"
+              className="h-9 lg:h-8 min-w-0 flex-1 lg:flex-none lg:max-w-[220px] px-2 rounded-md border border-line bg-surface text-fg text-xs"
             >
               {organizations.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
             </select>
@@ -312,30 +313,145 @@ export default function PaymentWidgetPage() {
         <button
           type="button"
           onClick={addRow}
-          className="flex items-center gap-1.5 h-8 px-3 rounded-md border border-line text-xs font-medium text-muted hover:border-accent hover:text-accent transition-all"
+          className="hidden lg:flex items-center gap-1.5 h-8 px-3 rounded-md border border-line text-xs font-medium text-muted hover:border-accent hover:text-accent transition-all"
         >
           <Plus size={14} /> Строка
         </button>
-        {/* Кнопка неактивна — сразу говорим, чего не хватает. */}
+        {/* Кнопка неактивна — сразу говорим, чего не хватает. На телефоне и
+            кнопка, и подсказка живут в нижней панели. */}
         {!submitting && submitBlocker && (
-          <span className="text-xs text-amber-600">{submitBlocker}</span>
+          <span className="hidden lg:inline text-xs text-amber-600">{submitBlocker}</span>
         )}
         <button
           type="button"
           onClick={handleSubmit}
           disabled={!canSubmit}
           title={submitBlocker ?? 'Создать документы в МойСклад'}
-          className="flex items-center gap-1.5 h-8 px-4 rounded-md bg-accent text-white text-xs font-semibold hover:bg-accent-strong transition-all disabled:opacity-40"
+          className="hidden lg:flex items-center gap-1.5 h-8 px-4 rounded-md bg-accent text-white text-xs font-semibold hover:bg-accent-strong transition-all disabled:opacity-40"
         >
           {submitting && <Loader2 size={13} className="animate-spin" />}
           {submitting ? 'Создание…' : 'Создать документы'}
         </button>
-        <div className="w-px h-6 bg-line mx-1" />
-        <ThemeToggle />
+        <div className="hidden lg:block w-px h-6 bg-line mx-1" />
+        <div className="hidden lg:block"><ThemeToggle /></div>
       </div>
 
-      {/* Grid — fills the rest of the screen */}
-      <div className="flex-1 overflow-auto">
+      {/* Телефон: каждая строка — карточка */}
+      <div className="lg:hidden flex-1 overflow-auto px-3 py-3 space-y-3">
+        {rows.map((r, i) => {
+          const res = results[r.key]
+          return (
+            <div
+              key={r.key}
+              className={`rounded-xl border bg-surface p-3 space-y-3 ${
+                res?.status === 'success' ? 'border-green-500/40'
+                  : res?.status === 'error' ? 'border-red-500/50'
+                  : 'border-line'
+              }`}
+            >
+              <div className="flex items-start gap-2">
+                <span className={`w-5 shrink-0 pt-2.5 text-center font-mono text-xs ${
+                  res?.status === 'success' ? 'text-green-600'
+                    : res?.status === 'error' ? 'text-red-600'
+                    : 'text-faint'
+                }`}>
+                  {res?.status === 'success' ? '✓' : res?.status === 'error' ? '✕' : i + 1}
+                </span>
+                <div className="min-w-0 flex-1 rounded-lg border border-line bg-surface focus-within:ring-2 focus-within:ring-accent focus-within:ring-inset">
+                  <SearchCell
+                    value={r.client}
+                    onSelect={opt => patchRow(r.key, { client: opt })}
+                    fetch={searchCounterparties}
+                    token={token}
+                    placeholder="Выберите контрагента…"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => removeRow(r.key)}
+                  disabled={rows.length === 1}
+                  aria-label="Удалить строку"
+                  className="w-9 h-9 shrink-0 rounded-lg flex items-center justify-center text-faint active:bg-red-500/10 active:text-red-500 disabled:opacity-30"
+                >
+                  <Trash2 size={16} />
+                </button>
+              </div>
+
+              {res?.status === 'error' && res.message && (
+                <p className="text-xs text-red-600">{res.message}</p>
+              )}
+
+              <MField label="Фирма">
+                <FirmCell
+                  value={r.firm}
+                  onChange={text => patchRow(r.key, { firm: text })}
+                  fetchSuggestions={q => searchFromWhomValues(token, fromWhomAttrs[r.type], q)}
+                  placeholder="Введите или выберите фирму…"
+                />
+              </MField>
+
+              <div className="grid grid-cols-2 gap-3">
+                <MField label="Тип">
+                  <select
+                    value={r.type}
+                    onChange={e => patchRow(r.key, { type: e.target.value as PaymentDocType })}
+                    className={CELL}
+                  >
+                    {PAYMENT_TYPES.map(pt => <option key={pt.value} value={pt.value}>{pt.label}</option>)}
+                  </select>
+                </MField>
+                <MField label="Дата">
+                  <input
+                    type="date"
+                    value={r.date}
+                    onChange={e => patchRow(r.key, { date: e.target.value })}
+                    className={`${CELL} font-mono`}
+                  />
+                </MField>
+                <MField label="Валюта">
+                  <select
+                    value={r.currency}
+                    onChange={e => patchRow(r.key, { currency: e.target.value as Cur })}
+                    className={CELL}
+                  >
+                    {CURRENCIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+                  </select>
+                </MField>
+                <MField label="Сумма">
+                  <GroupedNumberInput
+                    value={r.amount}
+                    onChange={n => patchRow(r.key, { amount: n })}
+                    placeholder="0"
+                    className={`${CELL} font-mono text-right`}
+                  />
+                </MField>
+                {r.currency === 'UZS' && (
+                  <MField label="Курс">
+                    <GroupedNumberInput
+                      value={r.rate}
+                      onChange={n => patchRow(r.key, { rate: n })}
+                      placeholder="0"
+                      className={`${CELL} font-mono text-right`}
+                    />
+                  </MField>
+                )}
+                <MStat label="Сумма в $" value={fmtUsd(usdOf(r))} valueClassName="text-muted text-right" />
+              </div>
+            </div>
+          )
+        })}
+
+        <button
+          type="button"
+          onClick={addRow}
+          className="w-full h-12 flex items-center justify-center gap-2 rounded-xl border border-dashed border-line text-sm text-muted active:bg-surface-2"
+        >
+          <Plus size={16} /> Добавить строку
+        </button>
+      </div>
+
+      {/* Grid — fills the rest of the screen (широкий экран) */}
+      <div className="hidden lg:block flex-1 overflow-auto">
         <div style={{ minWidth: widths.reduce((s, w) => s + w, 0) + 84 }} className="min-h-full flex flex-col">
           {/* Header (frozen) */}
           <div className="grid sticky top-0 z-20 bg-surface-2 border-b border-line shadow-sm" style={{ gridTemplateColumns: COLS }}>
@@ -472,8 +588,35 @@ export default function PaymentWidgetPage() {
         </div>
       </div>
 
-      {/* Status bar */}
-      <div className="shrink-0 h-7 flex items-center gap-4 px-3 border-t border-line bg-surface-2 text-[11px] text-faint">
+      {/* Телефон: итоги и отправка всегда под рукой */}
+      <div className="lg:hidden shrink-0 border-t border-line bg-surface px-3 py-2 space-y-1.5">
+        {savedCount > 0 && <p className="text-xs text-green-600">✓ Создано документов: {savedCount}</p>}
+        {errorCount > 0 && (
+          <p className="text-xs text-red-600">Ошибок: {errorCount}{firstError ? ` · ${firstError}` : ''}</p>
+        )}
+        {firstWarning && <p className="text-xs text-amber-600">{firstWarning}</p>}
+        {!submitting && errorCount === 0 && submitBlocker && (
+          <p className="text-xs text-amber-600">{submitBlocker}</p>
+        )}
+        <div className="flex items-center gap-3">
+          <div className="min-w-0 flex-1">
+            <p className="text-[11px] text-muted">Строк: {rows.length}</p>
+            <p className="truncate font-mono text-[17px] font-bold tabular-nums text-fg">$ {fmtUsd(totalUsd)}</p>
+          </div>
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={!canSubmit}
+            className="h-12 px-4 shrink-0 flex items-center gap-2 whitespace-nowrap rounded-xl bg-accent text-white text-sm font-semibold active:bg-accent-strong disabled:opacity-40"
+          >
+            {submitting && <Loader2 size={15} className="animate-spin" />}
+            {submitting ? 'Создание…' : 'Создать документы'}
+          </button>
+        </div>
+      </div>
+
+      {/* Status bar (широкий экран) */}
+      <div className="hidden lg:flex shrink-0 h-7 items-center gap-4 px-3 border-t border-line bg-surface-2 text-[11px] text-faint">
         <span>Строк: {rows.length}</span>
         <span className="tabular-nums">Итого $ {fmtUsd(totalUsd)}</span>
         <button

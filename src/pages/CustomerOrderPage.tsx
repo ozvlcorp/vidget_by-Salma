@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Plus, X, Loader2, Check } from 'lucide-react'
+import { Plus, X, Loader2, Check, ChevronDown, Trash2 } from 'lucide-react'
 import {
   getOrganizations, getStores, searchCounterparties, searchProducts, createCustomerOrder,
   getCurrencies, getOrderStates, getUoms, getContracts, createContract, getAllContractNames, msMoment,
@@ -9,7 +9,7 @@ import {
 } from '../api/moysklad'
 import { useAppContext } from '../context/AppContext'
 import { GroupedNumberInput } from '../components/GroupedNumberInput'
-import { CELL, CELLBOX, GUTTER, HeadCell, SearchCell, todayStr, fmtMoney, useColumnWidths } from '../components/grid'
+import { CELL, CELLBOX, GUTTER, HeadCell, MField, MStat, SearchCell, todayStr, fmtMoney, useColumnWidths } from '../components/grid'
 
 type Cur = 'UZS' | 'USD'
 const CURRENCIES: Array<{ value: Cur; label: string }> = [
@@ -42,11 +42,17 @@ function pickOrderStates(all: OrderState[]): OrderState[] {
 // товар · количество · остаток · ед.изм · объём · цена за литр · сумма
 const DEFAULT_COL_WIDTHS = [420, 104, 110, 132, 116, 140, 150]
 
-const FIELD = 'h-8 px-2 rounded-md border border-line bg-surface text-fg text-xs'
+const FIELD = 'h-9 lg:h-8 px-2 rounded-md border border-line bg-surface text-fg text-xs'
+// Строка «подпись — поле» в шапке: на телефоне во всю ширину, на десктопе — в ряд.
+const HEAD_LABEL = 'flex w-full lg:w-auto items-center justify-between lg:justify-start gap-2 text-xs text-muted'
+// Сам ввод: на телефоне занимает правую половину строки, на десктопе — по контенту.
+const HEAD_INPUT = 'min-w-0 flex-1 lg:flex-none'
 
 export default function CustomerOrderPage() {
   const { token, userName } = useAppContext()
   const nextKey = useRef(1)
+  // Телефон: параметры заказа занимают целый экран, поэтому их можно свернуть.
+  const [paramsOpen, setParamsOpen] = useState(true)
 
   // Ширины столбцов + перетаскивание границ (сохраняются между сессиями).
   // Все столбцы фиксированные — тогда «Товар» тянется ровно так, как задал
@@ -332,35 +338,52 @@ export default function CustomerOrderPage() {
 
   return (
     <div className="h-full flex flex-col overflow-hidden bg-base text-fg">
+      {/* Телефон: одна строка-сводка вместо всей шапки */}
+      <button
+        type="button"
+        onClick={() => setParamsOpen(v => !v)}
+        aria-expanded={paramsOpen}
+        className="lg:hidden shrink-0 w-full flex items-center gap-2 px-3 h-11 border-b border-line bg-surface text-left"
+      >
+        <span className="flex-1 min-w-0 truncate text-xs text-muted">
+          {agent ? <span className="text-fg font-medium">{agent.name}</span> : 'Параметры заказа'}
+          {selectedState && <span className="text-faint"> · {selectedState.name}</span>}
+        </span>
+        <ChevronDown
+          size={16}
+          className={`shrink-0 text-muted transition-transform ${paramsOpen ? 'rotate-180' : ''}`}
+        />
+      </button>
+
       {/* Order header */}
-      <div className="shrink-0 border-b border-line bg-surface px-3 py-2 flex flex-wrap items-center gap-x-4 gap-y-2">
-        <label className="flex items-center gap-1.5 text-xs text-muted">
+      <div className={`${paramsOpen ? 'flex' : 'hidden'} lg:flex shrink-0 max-h-[55vh] lg:max-h-none overflow-y-auto lg:overflow-visible border-b border-line bg-surface px-3 py-2 flex-col lg:flex-row lg:flex-wrap lg:items-center gap-x-4 gap-y-2.5`}>
+        <label className={HEAD_LABEL}>
           Юр. лицо:
           {organizations === null ? <span className="text-faint">…</span> : (
-            <select value={orgId} onChange={e => setOrgId(e.target.value)} className={`${FIELD} max-w-[200px]`}>
+            <select value={orgId} onChange={e => setOrgId(e.target.value)} className={`${FIELD} ${HEAD_INPUT} lg:max-w-[200px]`}>
               {organizations.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
             </select>
           )}
         </label>
-        <label className="flex items-center gap-1.5 text-xs text-muted">
+        <label className={HEAD_LABEL}>
           Склад:
           {stores === null ? <span className="text-faint">…</span> : stores.length === 0 ? <span className="text-faint">нет</span> : (
-            <select value={storeId} onChange={e => setStoreId(e.target.value)} className={`${FIELD} max-w-[180px]`}>
+            <select value={storeId} onChange={e => setStoreId(e.target.value)} className={`${FIELD} ${HEAD_INPUT} lg:max-w-[180px]`}>
               {stores.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
           )}
         </label>
-        <label className="flex items-center gap-1.5 text-xs text-muted">
+        <label className={HEAD_LABEL}>
           Дата:
-          <input type="date" value={date} onChange={e => setDate(e.target.value)} className={`${FIELD} font-mono`} />
+          <input type="date" value={date} onChange={e => setDate(e.target.value)} className={`${FIELD} ${HEAD_INPUT} font-mono`} />
         </label>
-        <label className="flex items-center gap-1.5 text-xs text-muted">
+        <label className={HEAD_LABEL}>
           Контрагент:
-          <div className="w-52 rounded-md border border-line bg-surface">
+          <div className={`${HEAD_INPUT} lg:w-52 lg:flex-none rounded-md border border-line bg-surface`}>
             <SearchCell value={agent} onSelect={setAgent} fetch={searchCounterparties} token={token} placeholder="Выберите контрагента…" />
           </div>
         </label>
-        <div className="flex items-center gap-1.5 text-xs text-muted">
+        <div className={HEAD_LABEL}>
           Договор:
           {newContract === null ? (
             <>
@@ -368,7 +391,7 @@ export default function CustomerOrderPage() {
                 value={contractId}
                 onChange={e => setContractId(e.target.value)}
                 disabled={!agent || contracts.length === 0}
-                className={`${FIELD} max-w-[200px] disabled:opacity-50`}
+                className={`${FIELD} ${HEAD_INPUT} lg:max-w-[200px] disabled:opacity-50`}
               >
                 <option value="">{!agent ? '— выберите контрагента —' : contracts.length === 0 ? '— нет договоров —' : '— не задан —'}</option>
                 {contracts.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -378,7 +401,7 @@ export default function CustomerOrderPage() {
                 onClick={() => { setNewContract(''); setContractErr(null) }}
                 disabled={!agent || !orgId}
                 title={agent ? 'Создать договор' : 'Сначала выберите контрагента'}
-                className="w-7 h-7 shrink-0 rounded-md border border-line flex items-center justify-center text-muted hover:text-accent hover:border-accent transition-colors disabled:opacity-40 disabled:hover:text-muted disabled:hover:border-line"
+                className="w-9 h-9 lg:w-7 lg:h-7 shrink-0 rounded-md border border-line flex items-center justify-center text-muted hover:text-accent hover:border-accent transition-colors disabled:opacity-40 disabled:hover:text-muted disabled:hover:border-line"
               >
                 <Plus size={14} />
               </button>
@@ -395,14 +418,14 @@ export default function CustomerOrderPage() {
                   if (e.key === 'Escape') { setNewContract(null); setContractErr(null) }
                 }}
                 placeholder="Номер договора"
-                className={`${FIELD} w-44 ${contractDuplicate ? 'border-red-500' : ''}`}
+                className={`${FIELD} ${HEAD_INPUT} lg:w-44 ${contractDuplicate ? 'border-red-500' : ''}`}
               />
               <button
                 type="button"
                 onClick={handleCreateContract}
                 disabled={!newContract.trim() || contractBusy || contractDuplicate}
                 title={contractDuplicate ? 'Такой номер уже существует' : 'Сохранить договор'}
-                className="w-7 h-7 shrink-0 rounded-md bg-accent text-white flex items-center justify-center hover:bg-accent-strong transition-colors disabled:opacity-40"
+                className="w-9 h-9 lg:w-7 lg:h-7 shrink-0 rounded-md bg-accent text-white flex items-center justify-center hover:bg-accent-strong transition-colors disabled:opacity-40"
               >
                 {contractBusy ? <Loader2 size={13} className="animate-spin" /> : <Check size={14} />}
               </button>
@@ -410,7 +433,7 @@ export default function CustomerOrderPage() {
                 type="button"
                 onClick={() => { setNewContract(null); setContractErr(null) }}
                 title="Отмена"
-                className="w-7 h-7 shrink-0 rounded-md border border-line flex items-center justify-center text-muted hover:text-red-500 transition-colors"
+                className="w-9 h-9 lg:w-7 lg:h-7 shrink-0 rounded-md border border-line flex items-center justify-center text-muted hover:text-red-500 transition-colors"
               >
                 <X size={14} />
               </button>
@@ -420,14 +443,14 @@ export default function CustomerOrderPage() {
           )}
         </div>
         {kindAttr && (
-          <label className="flex items-center gap-1.5 text-xs text-muted">
+          <label className={HEAD_LABEL}>
             {kindAttr.name}:
             {kindAttr.type === 'customentity' ? (
               <select
                 value={kindId}
                 onChange={e => setKindId(e.target.value)}
                 disabled={kindValues.length === 0}
-                className={`${FIELD} max-w-[190px]`}
+                className={`${FIELD} ${HEAD_INPUT} lg:max-w-[190px]`}
               >
                 <option value="">
                   {kindValues.length === 0 ? '— справочник пуст —' : '— не задан —'}
@@ -439,28 +462,28 @@ export default function CustomerOrderPage() {
                 value={kindText}
                 onChange={e => setKindText(e.target.value)}
                 placeholder="не задан"
-                className={`${FIELD} w-44`}
+                className={`${FIELD} ${HEAD_INPUT} lg:w-44`}
               />
             )}
           </label>
         )}
-        <label className="flex items-center gap-1.5 text-xs text-muted">
+        <label className={HEAD_LABEL}>
           Валюта:
-          <select value={currency} onChange={e => setCurrency(e.target.value as Cur)} className={FIELD}>
+          <select value={currency} onChange={e => setCurrency(e.target.value as Cur)} className={`${FIELD} ${HEAD_INPUT}`}>
             {CURRENCIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
           </select>
         </label>
         {currency === 'UZS' && (
-          <label className="flex items-center gap-1.5 text-xs text-muted">
+          <label className={HEAD_LABEL}>
             Курс:
-            <div className="w-24 rounded-md border border-line bg-surface">
+            <div className={`${HEAD_INPUT} lg:w-24 lg:flex-none rounded-md border border-line bg-surface`}>
               <GroupedNumberInput value={rate} onChange={setRate} placeholder="0" className={`${CELL} font-mono text-right`} />
             </div>
           </label>
         )}
-        <label className="flex items-center gap-1.5 text-xs text-muted">
+        <label className={HEAD_LABEL}>
           Статус:
-          <span className="relative flex items-center">
+          <span className={`${HEAD_INPUT} relative flex items-center`}>
             {/* Цветовая метка статуса — тот же цвет, что в МойСклад */}
             {selectedState && (
               <span
@@ -471,7 +494,7 @@ export default function CustomerOrderPage() {
             <select
               value={stateId}
               onChange={e => setStateId(e.target.value)}
-              className={`${FIELD} max-w-[180px] ${selectedState ? 'pl-6' : ''}`}
+              className={`${FIELD} w-full lg:w-auto lg:max-w-[180px] ${selectedState ? 'pl-6' : ''}`}
               style={selectedState
                 ? { color: selectedState.color, borderColor: selectedState.color, fontWeight: 600 }
                 : undefined}
@@ -486,26 +509,114 @@ export default function CustomerOrderPage() {
             </select>
           </span>
         </label>
-        <div className="flex-1" />
+        <div className="hidden lg:block flex-1" />
         {/* Кнопка неактивна — сразу говорим, чего не хватает, иначе нажатие
-            выглядит как «ничего не произошло». */}
+            выглядит как «ничего не произошло». На телефоне и то и другое живёт
+            в нижней панели, чтобы не листать шапку ради отправки. */}
         {!submitting && submitBlocker && (
-          <span className="text-xs text-amber-600">{submitBlocker}</span>
+          <span className="hidden lg:inline text-xs text-amber-600">{submitBlocker}</span>
         )}
         <button
           type="button"
           onClick={handleSubmit}
           disabled={!canSubmit}
           title={submitBlocker ?? 'Создать заказ в МойСклад'}
-          className="flex items-center gap-1.5 h-8 px-4 rounded-md bg-accent text-white text-xs font-semibold hover:bg-accent-strong transition-all disabled:opacity-40"
+          className="hidden lg:flex items-center gap-1.5 h-8 px-4 rounded-md bg-accent text-white text-xs font-semibold hover:bg-accent-strong transition-all disabled:opacity-40"
         >
           {submitting && <Loader2 size={13} className="animate-spin" />}
           {submitting ? 'Создание…' : 'Создать заказ'}
         </button>
       </div>
 
-      {/* Positions grid */}
-      <div className="flex-1 overflow-auto">
+      {/* Телефон: каждая позиция — карточка; таблица в 8 столбцов туда не влезает */}
+      <div className="lg:hidden flex-1 overflow-auto px-3 py-3 space-y-3">
+        {rows.map((r, i) => (
+          <div key={r.key} className="rounded-xl border border-line bg-surface p-3 space-y-3">
+            <div className="flex items-start gap-2">
+              <span className="w-5 shrink-0 pt-2.5 text-center font-mono text-xs text-faint">{i + 1}</span>
+              <div className="min-w-0 flex-1 rounded-lg border border-line bg-surface focus-within:ring-2 focus-within:ring-accent focus-within:ring-inset">
+                <SearchCell
+                  value={r.product}
+                  onSelect={p => pickProduct(r.key, p)}
+                  fetch={(tok, q) => searchProducts(tok, q, storeId || undefined)}
+                  token={token}
+                  placeholder="Выберите товар…"
+                  hideEmpty
+                  renderMeta={p => `Ост: ${stockLabel(p)}`}
+                  itemClassName={p => (p.stock <= 0 ? 'text-red-500 opacity-50' : '')}
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => removeRow(r.key)}
+                disabled={rows.length === 1}
+                aria-label="Удалить позицию"
+                className="w-9 h-9 shrink-0 rounded-lg flex items-center justify-center text-faint active:bg-red-500/10 active:text-red-500 disabled:opacity-30"
+              >
+                <Trash2 size={16} />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <MField label="Количество">
+                <GroupedNumberInput
+                  value={r.quantity}
+                  onChange={n => patchRow(r.key, { quantity: n })}
+                  placeholder="0"
+                  className={`${CELL} font-mono text-right`}
+                />
+              </MField>
+              <MField label="Ед. изм.">
+                <select
+                  value={r.packId}
+                  onChange={e => patchRow(r.key, { packId: e.target.value })}
+                  disabled={!r.product}
+                  className={`${CELL} disabled:cursor-not-allowed`}
+                >
+                  <option value="">{baseUnitLabel(r)}</option>
+                  {(r.product?.packs ?? []).map(p => (
+                    <option key={p.id} value={p.id}>{packLabel(r, p)}</option>
+                  ))}
+                </select>
+              </MField>
+              <MField label="Цена за литр, $">
+                <GroupedNumberInput
+                  value={r.pricePerLiter}
+                  onChange={n => patchRow(r.key, { pricePerLiter: n })}
+                  placeholder="0"
+                  decimalComma
+                  className={`${CELL} font-mono text-right font-bold`}
+                />
+              </MField>
+              <MStat
+                label="Остаток"
+                value={r.product ? stockLabel(r.product) : '—'}
+                valueClassName={r.product && r.product.stock <= 0 ? 'text-red-500 opacity-70' : 'text-muted'}
+              />
+            </div>
+
+            <div className="flex items-center justify-between border-t border-line pt-2 text-sm">
+              <span className="text-xs uppercase tracking-wide text-muted">
+                Объём {r.product ? `${fmtMoney(litersOf(r))} л` : '—'}
+              </span>
+              <span className="font-mono font-bold tabular-nums text-fg">
+                {fmtMoney(sumOf(r))} {sumCurLabel}
+              </span>
+            </div>
+          </div>
+        ))}
+
+        <button
+          type="button"
+          onClick={addRow}
+          className="w-full h-12 flex items-center justify-center gap-2 rounded-xl border border-dashed border-line text-sm text-muted active:bg-surface-2"
+        >
+          <Plus size={16} /> Добавить товар
+        </button>
+      </div>
+
+      {/* Positions grid (широкий экран) */}
+      <div className="hidden lg:block flex-1 overflow-auto">
         <div style={{ minWidth: widths.reduce((s, w) => s + w, 0) + 84 }} className="min-h-full flex flex-col">
           {/* Header */}
           <div className="grid sticky top-0 z-20 bg-surface-2 border-b border-line shadow-sm" style={{ gridTemplateColumns: COLS }}>
@@ -628,8 +739,33 @@ export default function CustomerOrderPage() {
         </div>
       </div>
 
-      {/* Status bar */}
-      <div className="shrink-0 h-7 flex items-center gap-4 px-3 border-t border-line bg-surface-2 text-[11px] text-faint">
+      {/* Телефон: итоги и отправка всегда под рукой */}
+      <div className="lg:hidden shrink-0 border-t border-line bg-surface px-3 py-2 space-y-1.5">
+        {okMsg && <p className="text-xs text-green-600">✓ {okMsg}</p>}
+        {warn && <p className="text-xs text-amber-600">{warn}</p>}
+        {error && <p className="text-xs text-red-600">Ошибка: {error}</p>}
+        {!submitting && !error && submitBlocker && <p className="text-xs text-amber-600">{submitBlocker}</p>}
+        <div className="flex items-center gap-3">
+          <div className="min-w-0 flex-1">
+            <p className="text-[11px] text-muted">Позиций: {rows.length} · {fmtMoney(totalLiters)} л</p>
+            <p className="truncate font-mono text-[17px] font-bold tabular-nums text-fg">
+              {fmtMoney(total)} {sumCurLabel}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={!canSubmit}
+            className="h-12 px-4 shrink-0 flex items-center gap-2 whitespace-nowrap rounded-xl bg-accent text-white text-sm font-semibold active:bg-accent-strong disabled:opacity-40"
+          >
+            {submitting && <Loader2 size={15} className="animate-spin" />}
+            {submitting ? 'Создание…' : 'Создать заказ'}
+          </button>
+        </div>
+      </div>
+
+      {/* Status bar (широкий экран) */}
+      <div className="hidden lg:flex shrink-0 h-7 items-center gap-4 px-3 border-t border-line bg-surface-2 text-[11px] text-faint">
         <span>Позиций: {rows.length}</span>
         <span className="tabular-nums">
           Итого: {fmtMoney(total)} {currency === 'UZS' ? 'сум' : '$'}
