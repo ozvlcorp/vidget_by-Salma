@@ -529,7 +529,7 @@ export default function CustomerOrderPage() {
       </div>
 
       {/* Телефон: каждая позиция — карточка; таблица в 8 столбцов туда не влезает */}
-      <div className="lg:hidden flex-1 overflow-auto px-3 py-3 space-y-3">
+      <div className="lg:hidden flex-1 min-h-0 overflow-auto px-3 py-3 space-y-3">
         {rows.map((r, i) => (
           <div key={r.key} className="rounded-xl border border-line bg-surface p-3 space-y-3">
             <div className="flex items-start gap-2">
@@ -616,7 +616,7 @@ export default function CustomerOrderPage() {
       </div>
 
       {/* Positions grid (широкий экран) */}
-      <div className="hidden lg:block flex-1 overflow-auto">
+      <div className="hidden lg:block flex-1 min-h-0 overflow-auto">
         <div style={{ minWidth: widths.reduce((s, w) => s + w, 0) + 84 }} className="min-h-full flex flex-col">
           {/* Header */}
           <div className="grid sticky top-0 z-20 bg-surface-2 border-b border-line shadow-sm" style={{ gridTemplateColumns: COLS }}>

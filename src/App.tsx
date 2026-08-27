@@ -34,7 +34,7 @@ function getInitialTheme(): Theme {
 /** Экран для прямого захода: виджет работает как решение внутри МойСклад. */
 function OpenFromMoyskladScreen() {
   return (
-    <div className="fabric-bg min-h-screen flex items-center justify-center p-6">
+    <div className="fabric-bg app-minh flex items-center justify-center p-6">
       <div className="bg-surface/80 backdrop-blur-sm rounded-2xl border border-line p-8 max-w-sm text-center space-y-2 shadow-xl">
         <p className="text-sm font-semibold text-fg">Откройте виджет из МойСклад</p>
         <p className="text-xs text-muted">
@@ -128,7 +128,7 @@ function App() {
 
   if (booting) {
     return (
-      <div className="fabric-bg min-h-screen flex items-center justify-center">
+      <div className="fabric-bg app-minh flex items-center justify-center">
         <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
       </div>
     )
@@ -248,7 +248,7 @@ function Shell() {
         </div>
       </nav>
 
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden">
         {/* Телефон: шапка с названием раздела, темой и выходом */}
         <header className="md:hidden shrink-0 pt-safe border-b border-line bg-surface">
           <div className="h-12 flex items-center gap-2 px-3">
@@ -275,7 +275,7 @@ function Shell() {
           </div>
         </header>
 
-        <div className="flex-1 overflow-hidden">
+        <div className="flex-1 min-h-0 overflow-hidden">
           {section === 'payment' ? <PaymentWidgetPage />
             : section === 'order' ? <CustomerOrderPage />
             : <DashboardPage />}

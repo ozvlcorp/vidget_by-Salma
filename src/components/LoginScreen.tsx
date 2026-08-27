@@ -32,7 +32,7 @@ export default function LoginScreen({ onLogin }: { onLogin: (token: string, name
   }
 
   return (
-    <div className="fabric-bg min-h-screen flex items-center justify-center p-6">
+    <div className="fabric-bg app-minh flex items-center justify-center p-6">
       <form
         onSubmit={handleSubmit}
         className="bg-surface/80 backdrop-blur-sm rounded-2xl border border-line p-8 w-full max-w-sm space-y-5 shadow-xl"

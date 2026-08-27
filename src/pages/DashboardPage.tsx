@@ -217,7 +217,7 @@ export default function DashboardPage() {
         {orders === null && <Loader2 size={16} className="animate-spin text-accent" />}
       </div>
 
-      <div className="flex-1 overflow-auto">
+      <div className="flex-1 min-h-0 overflow-auto">
         {/* Итоги */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 p-3">
           {[
