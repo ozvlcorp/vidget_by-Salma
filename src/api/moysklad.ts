@@ -348,10 +348,6 @@ export async function searchProducts(token: string, query: string, storeId?: str
   const q = query.trim()
   // No query → no suggestions (the dropdown only opens once the user types).
   if (!q) return []
-  const params: Record<string, string> = { search: q, limit: '20' }
-  // Scope the stock/quantity fields to a single store when one is chosen;
-  // without it MoySklad returns aggregate stock across all stores.
-  if (storeId) params.filter = `stockStore=${MS_API_ROOT}/entity/store/${storeId}`
   type Row = {
     id: string; name: string; meta: { type: string }
     salePrices?: Array<{ value: number }>
@@ -362,8 +358,29 @@ export async function searchProducts(token: string, query: string, storeId?: str
     packs?: Array<{ id: string; quantity?: number; uom?: { meta?: { href?: string } & Record<string, unknown> } }>
     attributes?: Array<{ name?: string; value?: unknown }>
   }
-  const data = await get<{ rows: Row[] }>('/entity/assortment', params, token)
-    .catch(() => ({ rows: [] as Row[] }))
+  const ask = (params: Record<string, string>) =>
+    get<{ rows: Row[] }>('/entity/assortment', params, token)
+      .then(d => d.rows ?? [])
+      .catch(() => null)   // null = запрос не прошёл, [] = прошёл и ничего не нашёл
+
+  // Остатки считаем по выбранному складу; без этого МойСклад отдаёт сумму по всем.
+  const storeFilter = storeId ? `stockStore=${MS_API_ROOT}/entity/store/${storeId}` : ''
+  const withStore = (f: string) => [storeFilter, f].filter(Boolean).join(';')
+
+  // Ищем фильтром по наименованию, а не параметром `search`: `search` смотрит ещё
+  // и в код, артикул и описание, поэтому в ответ попадают товары без набранных
+  // букв в названии — они занимают лимит, а нужные до него не доходят и пропадают
+  // из подсказок. Показывать всё равно нужно только совпадения по названию.
+  const LIMIT = '100'
+  let rows = await ask({ filter: withStore(`name~${q}`), limit: LIMIT })
+  // Фильтр не принят или ничего не нашёл — пробуем прежним способом, чтобы
+  // подсказки не пропали совсем.
+  if (rows === null || rows.length === 0) {
+    const params: Record<string, string> = { search: q, limit: LIMIT }
+    if (storeFilter) params.filter = storeFilter
+    rows = (await ask(params)) ?? []
+  }
+  const data = { rows }
   const readPricePerLiter = (attrs?: Array<{ name?: string; value?: unknown }>): number => {
     const a = attrs?.find(x => /цена\s*за\s*литр/i.test(x.name ?? ''))
     // custom field value can be a plain number or an object { value } depending on type
