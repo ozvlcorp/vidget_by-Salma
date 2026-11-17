@@ -3,7 +3,7 @@ import { Plus, X, Loader2, Check, ChevronDown, Trash2 } from 'lucide-react'
 import {
   getOrganizations, getStores, searchCounterparties, searchProducts, createCustomerOrder,
   getCurrencies, getOrderStates, getUoms, getContracts, createContract, getAllContractNames, msMoment,
-  resolveDocCurrency, getDocAttributes, getDictValues, buildDictAttribute, buildTextAttribute,
+  resolveDocCurrency, uzsPerUsdOf, getDocAttributes, getDictValues, buildDictAttribute, buildTextAttribute,
   type NamedOption, type OrganizationOption, type StoreOption, type ProductOption,
   type CurrencyRate, type OrderState, type DocAttribute, type DictOption,
 } from '../api/moysklad'
@@ -83,7 +83,10 @@ export default function CustomerOrderPage() {
   // Currency: доллар (base USD) by default, since the price is per litre in dollars;
   // сум → order in UZS with a rate.
   const [currency, setCurrency] = useState<Cur>('USD')
-  const [rate, setRate] = useState(0)
+  // Курс берём из справочника МойСклад, пока сотрудник не вписал свой: иначе при
+  // переключении на сум сумма оставалась нулевой до ручного ввода курса.
+  const [typedRate, setTypedRate] = useState(0)
+  const [rateTyped, setRateTyped] = useState(false)
   // Весь справочник валют: по нему определяется валюта учёта аккаунта.
   const [allCurrencies, setAllCurrencies] = useState<CurrencyRate[]>([])
 
@@ -100,6 +103,11 @@ export default function CustomerOrderPage() {
   const [kindValues, setKindValues] = useState<DictOption[]>([])
   const [kindId, setKindId] = useState('')      // выбранный элемент справочника
   const [kindText, setKindText] = useState('')  // значение для текстового поля
+
+  // Курс МойСклад (сум за 1 доллар) и действующий курс заказа.
+  const msRate = uzsPerUsdOf(allCurrencies)
+  const rate = rateTyped ? typedRate : msRate
+  const setRate = (n: number) => { setRateTyped(true); setTypedRate(n) }
 
   // Units of measure id → name (to label шт / коробка)
   const [uomName, setUomName] = useState<Record<string, string>>({})
@@ -489,9 +497,26 @@ export default function CustomerOrderPage() {
         {currency === 'UZS' && (
           <label className={HEAD_LABEL}>
             Курс:
-            <div className={`${HEAD_INPUT} lg:w-24 lg:flex-none rounded-md border border-line bg-surface`}>
+            <div
+              className={`${HEAD_INPUT} lg:w-24 lg:flex-none rounded-md border border-line bg-surface`}
+              title={rateTyped ? 'Свой курс' : 'Текущий курс из справочника МойСклад'}
+            >
               <GroupedNumberInput value={rate} onChange={setRate} placeholder="0" className={`${CELL} font-mono text-right`} />
             </div>
+            {/* Откуда курс: подставленный из МойСклад можно вернуть одним нажатием */}
+            {!rateTyped && msRate > 0 && (
+              <span className="shrink-0 text-[11px] text-faint">из МойСклад</span>
+            )}
+            {rateTyped && msRate > 0 && msRate !== typedRate && (
+              <button
+                type="button"
+                onClick={() => setRateTyped(false)}
+                title={`Вернуть курс МойСклад: ${fmtMoney(msRate)}`}
+                className="shrink-0 text-[11px] text-faint hover:text-accent hover:underline transition-colors"
+              >
+                вернуть {fmtMoney(msRate)}
+              </button>
+            )}
           </label>
         )}
         <label className={HEAD_LABEL}>

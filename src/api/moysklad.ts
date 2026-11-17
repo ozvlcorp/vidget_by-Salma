@@ -236,6 +236,18 @@ export function baseCurrencyOf(currencies: CurrencyRate[]): CurrencyRate | null 
 }
 
 /**
+ * Текущий курс из справочника МойСклад — сум за 1 доллар. 0, если в справочнике
+ * нет одной из валют. Деление одного курса на другой избавляет от вопроса, что
+ * у аккаунта является валютой учёта: базовая валюта сокращается.
+ */
+export function uzsPerUsdOf(currencies: CurrencyRate[]): number {
+  const usd = currencies.find(c => c.isoCode === 'USD')
+  const uzs = currencies.find(c => c.isoCode === 'UZS')
+  if (!usd || !uzs || !(usd.rate > 0) || !(uzs.rate > 0)) return 0
+  return Number((usd.rate / uzs.rate).toPrecision(12))
+}
+
+/**
  * Что положить в блок `rate` документа для выбранной валюты.
  *
  * МойСклад ведёт документ в валюте учёта, пока не указана другая, и отклоняет
