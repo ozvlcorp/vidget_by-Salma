@@ -218,18 +218,27 @@ export default function CustomerOrderPage() {
   const baseQtyOf = (r: Pos) => r.quantity * factorOf(r)     // всего базовых единиц (шт)
   // Литраж позиции: объём из карточки (за 1 шт) × количество в базовых единицах
   const litersOf = (r: Pos) => (r.product?.volume ?? 0) * baseQtyOf(r)
-  // Цена за ОДНУ базовую единицу (шт) = объём(л за шт) × цена за литр, в долларах
-  const unitPriceUsdOf = (r: Pos) => (r.product?.volume ?? 0) * r.pricePerLiter
+  // Товары с объёмом (напитки) продаются по цене за литр. У консервов и прочего
+  // штучного товара объём в карточке не заполнен — там цена задаётся за штуку,
+  // иначе сумма всегда выходила нулевой: 0 л × цена = 0.
+  const byLiter = (r: Pos) => (r.product?.volume ?? 0) > 0
+  // Цена за ОДНУ базовую единицу (шт), в долларах
+  const unitPriceUsdOf = (r: Pos) => (byLiter(r) ? (r.product?.volume ?? 0) * r.pricePerLiter : r.pricePerLiter)
   // Та же цена в валюте заказа (для сум умножаем на курс)
   const unitPriceMajorOf = (r: Pos) => (currency === 'UZS' ? unitPriceUsdOf(r) * rate : unitPriceUsdOf(r))
-  // Сумма позиции = ОБЪЁМ (литраж) × ЦЕНА ЗА ЛИТР — точный расчёт, без потери копеек.
-  const amountUsdOf = (r: Pos) => litersOf(r) * r.pricePerLiter
+  // Сумма позиции: по литражу — ОБЪЁМ × ЦЕНА ЗА ЛИТР (как было, без потери копеек),
+  // по штукам — КОЛИЧЕСТВО В ШТУКАХ × ЦЕНА ЗА ШТУКУ.
+  const amountUsdOf = (r: Pos) => (byLiter(r) ? litersOf(r) * r.pricePerLiter : baseQtyOf(r) * r.pricePerLiter)
   const sumOf = (r: Pos) => (currency === 'UZS' ? amountUsdOf(r) * rate : amountUsdOf(r))
   const total = rows.reduce((s, r) => s + sumOf(r), 0)
   const totalUsd = currency === 'UZS' && rate > 0 ? total / rate : total
   const totalLiters = rows.reduce((s, r) => s + litersOf(r), 0)
   // Base unit label (e.g. шт) for a row's product
   const baseUnitLabel = (r: Pos) => (r.product?.uomId && uomName[r.product.uomId]) || 'шт'
+  // За что задана цена в строке: «за литр» или «за шт»
+  const priceUnitOf = (r: Pos) => (byLiter(r) ? 'за литр' : `за ${baseUnitLabel(r)}`)
+  // Пока в заказе только товары с объёмом, шапка остаётся привычной.
+  const priceHeader = rows.some(r => r.product && !byLiter(r)) ? 'Цена, $' : 'Цена за литр, $'
   // Подпись упаковки с её размером из карточки товара: «коробка (8 шт)»
   const packLabel = (r: Pos, p: { id: string; quantity: number; uomId: string | null }) =>
     `${(p.uomId && uomName[p.uomId]) || 'упаковка'} (${p.quantity} ${baseUnitLabel(r)})`
@@ -262,14 +271,18 @@ export default function CustomerOrderPage() {
     return `${p.stock.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ${unit}`
   }
   const validRows = rows.filter(r => r.product && r.quantity > 0)
+  // Строка с товаром, но без цены даёт нулевую сумму — обычно это просто
+  // незаполненное поле, поэтому говорим об этом вместо молчаливого нуля.
+  const unpriced = validRows.find(r => r.pricePerLiter <= 0) ?? null
   // Цена за литр задана в долларах, поэтому для документа в сумах курс обязателен.
   const needsRate = currency === 'UZS'
   const canSubmit = !submitting && !!orgId && !!agent && validRows.length > 0
-    && (!needsRate || rate > 0)
+    && !unpriced && (!needsRate || rate > 0)
   // Почему кнопка неактивна — показываем рядом с ней.
   const submitBlocker = !orgId ? 'Выберите юр. лицо'
     : !agent ? 'Выберите контрагента из списка'
     : validRows.length === 0 ? 'Добавьте товар и количество'
+    : unpriced ? `Укажите цену ${priceUnitOf(unpriced)} для «${unpriced.product!.name}»`
     : needsRate && rate <= 0 ? 'Укажите курс'
     : null
   // Подпись валюты для итоговых сумм: цена всегда в долларах, а сумма — в валюте заказа.
@@ -579,7 +592,7 @@ export default function CustomerOrderPage() {
                   ))}
                 </select>
               </MField>
-              <MField label="Цена за литр, $">
+              <MField label={`Цена ${priceUnitOf(r)}, $`}>
                 <GroupedNumberInput
                   value={r.pricePerLiter}
                   onChange={n => patchRow(r.key, { pricePerLiter: n })}
@@ -626,7 +639,7 @@ export default function CustomerOrderPage() {
             <HeadCell label="Остаток" className="text-right" onResizeStart={startResize(2)} />
             <HeadCell label="Ед. изм." onResizeStart={startResize(3)} />
             <HeadCell label="Объём, л" className="text-right" onResizeStart={startResize(4)} />
-            <HeadCell label="Цена за литр, $" className="text-right" onResizeStart={startResize(5)} />
+            <HeadCell label={priceHeader} className="text-right" onResizeStart={startResize(5)} />
             <HeadCell label={`Сумма, ${sumCurLabel}`} className="text-right" onResizeStart={startResize(6)} />
             <div className="border-line" />
           </div>
@@ -673,7 +686,13 @@ export default function CustomerOrderPage() {
                   {r.product ? `${fmtMoney(litersOf(r))} л` : '—'}
                 </span>
               </div>
-              <div className={CELLBOX}>
+              <div className={CELLBOX} title={r.product ? `Цена ${priceUnitOf(r)}` : undefined}>
+                {/* У штучного товара цена задаётся не за литр — подписываем прямо в ячейке */}
+                {r.product && !byLiter(r) && (
+                  <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[11px] text-faint pointer-events-none">
+                    {priceUnitOf(r)}
+                  </span>
+                )}
                 <GroupedNumberInput
                   value={r.pricePerLiter}
                   onChange={n => patchRow(r.key, { pricePerLiter: n })}
