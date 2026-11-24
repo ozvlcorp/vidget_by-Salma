@@ -3,25 +3,9 @@ import { Loader2, RefreshCw } from 'lucide-react'
 import { getSalesOrders, getCurrencies, type SalesOrder, type CurrencyRate } from '../api/moysklad'
 import { useAppContext } from '../context/AppContext'
 import { HeadCell, GUTTER, todayStr, fmtMoney } from '../components/grid'
+import { PERIODS, monthStart } from '../lib/period'
 
 const FIELD = 'h-9 lg:h-8 px-2 rounded-md border border-line bg-surface text-fg text-xs'
-
-/** Первый день текущего месяца в формате YYYY-MM-DD. */
-function monthStart(): string {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`
-}
-function daysAgo(n: number): string {
-  const d = new Date()
-  d.setDate(d.getDate() - n)
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
-
-const PERIODS = [
-  { id: 'today', label: 'Сегодня', from: () => todayStr() },
-  { id: 'week', label: '7 дней', from: () => daysAgo(6) },
-  { id: 'month', label: 'Этот месяц', from: () => monthStart() },
-] as const
 
 const fmtNum = (n: number) => n.toLocaleString('ru-RU', { maximumFractionDigits: 2 })
 

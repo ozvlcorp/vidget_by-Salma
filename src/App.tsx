@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Sun, Moon, LogOut, Wallet, ClipboardList, BarChart3, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { Sun, Moon, LogOut, Wallet, ClipboardList, ListChecks, BarChart3, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { AppContext, useAppContext } from './context/AppContext'
 import type { Theme } from './context/AppContext'
@@ -9,6 +9,7 @@ import { parseLang } from './i18n'
 import type { Lang } from './i18n'
 import PaymentWidgetPage from './pages/PaymentWidgetPage'
 import CustomerOrderPage from './pages/CustomerOrderPage'
+import OrdersPage from './pages/OrdersPage'
 import DashboardPage from './pages/DashboardPage'
 import LoginScreen from './components/LoginScreen'
 
@@ -151,11 +152,12 @@ function App() {
   )
 }
 
-type Section = 'payment' | 'order' | 'dashboard'
+type Section = 'payment' | 'order' | 'orders' | 'dashboard'
 
 const SECTIONS: Array<{ id: Section; label: string; Icon: LucideIcon }> = [
   { id: 'payment', label: 'Разбивка платежа', Icon: Wallet },
   { id: 'order', label: 'Заказ покупателя', Icon: ClipboardList },
+  { id: 'orders', label: 'Заявки', Icon: ListChecks },
   { id: 'dashboard', label: 'Мои продажи', Icon: BarChart3 },
 ]
 
@@ -278,6 +280,7 @@ function Shell() {
         <div className="flex-1 min-h-0 overflow-hidden">
           {section === 'payment' ? <PaymentWidgetPage />
             : section === 'order' ? <CustomerOrderPage />
+            : section === 'orders' ? <OrdersPage />
             : <DashboardPage />}
         </div>
 

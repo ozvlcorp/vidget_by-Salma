@@ -111,14 +111,14 @@ function isFieldDenied(status: number, detail: string): boolean {
   return status === 403 && /пол[ея]|field/i.test(detail)
 }
 
-function msErrorOf(status: number, detail: string, what: string): Error {
+function msErrorOf(status: number, detail: string, what: string, action = 'создание'): Error {
   if (status === 403) {
     // МойСклад различает права на сам документ и на его доп. поля: отказ по полю
     // выглядит как «нет прав на редактирование поля 'value'» — подсказываем адресно.
     const hint = isFieldDenied(status, detail)
       ? ' У роли сотрудника нет прав на дополнительное поле документа (виджет пишет «От кого» и «Вид товара»).'
         + ' Дайте роли право на редактирование этого доп. поля — или оставьте его пустым.'
-      : ` Проверьте в роли сотрудника право на создание документа «${what}».`
+      : ` Проверьте в роли сотрудника право на ${action} документа «${what}».`
     return new Error(`Недостаточно прав в МойСклад${detail ? `: ${detail}.` : '.'}${hint}`)
   }
   return new Error(detail || `Ошибка МойСклад (HTTP ${status})`)
@@ -507,6 +507,31 @@ export async function createContract(
   return { id: data.id, name: data.name }
 }
 
+/**
+ * Меняет статус существующего заказа покупателя.
+ *
+ * Запрос уходит под токеном самого сотрудника, поэтому право на изменение
+ * документа проверяет МойСклад: если роли нельзя — вернётся 403, и виджет
+ * показывает причину, а не молча оставляет прежний статус.
+ */
+export async function updateOrderState(
+  token: string, orderId: string, stateMeta: Record<string, unknown>,
+): Promise<void> {
+  const r = await msFetch(`${BASE}/entity/customerorder/${orderId}`, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/json;charset=utf-8',
+    },
+    body: JSON.stringify({ state: { meta: stateMeta } }),
+  })
+  if (!r.ok) {
+    const detail = msErrorDetail(await r.text().catch(() => ''))
+    throw msErrorOf(r.status, detail, 'заказы покупателей', 'изменение')
+  }
+}
+
 // ─── Мини-дашборд продаж ──────────────────────────────────────────────────────
 
 /** Одна отгруженная позиция заказа, приведённая к литрам и коробкам. */
@@ -523,6 +548,8 @@ export interface SalesOrder {
   sumMajor: number
   /** Та же сумма в валюте учёта — по ней сравниваем заказы в разных валютах. */
   baseSumMajor: number
+  /** Текущий статус документа; null — статус не задан. */
+  stateId: string | null
 }
 
 /**
@@ -543,6 +570,7 @@ export async function getSalesOrders(token: string, fromDate: string, toDate: st
     rate?: { value?: number }
     agent?: { name?: string }
     owner?: { name?: string; fullName?: string }
+    state?: { meta?: { href?: string } }
     positions?: { rows?: Pos[] }
   }
   const filter = `moment>=${mskAt(fromDate, 0, 0, 0)};moment<=${mskAt(toDate, 23, 59, 59)}`
@@ -576,6 +604,7 @@ export async function getSalesOrders(token: string, fromDate: string, toDate: st
         employee: stamped || r.owner?.fullName || r.owner?.name || '—',
         liters,
         boxes,
+        stateId: idFromHref(r.state?.meta?.href),
         sumMajor: (r.sum ?? 0) / 100,
         // Без блока rate документ уже в валюте учёта, поэтому множитель 1.
         baseSumMajor: ((r.sum ?? 0) / 100) * (r.rate?.value && r.rate.value > 0 ? r.rate.value : 1),
