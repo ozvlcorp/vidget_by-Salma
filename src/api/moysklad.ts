@@ -441,11 +441,16 @@ function stateColor(raw?: number): string {
   return `#${rgb.toString(16).padStart(6, '0')}`
 }
 
-/** Available statuses (состояния) for a customer order, with their MoySklad colours. */
+/**
+ * Статусы заказа покупателя с цветами МойСклад.
+ *
+ * Ошибку наружу не глушим: если роли сотрудника не дают читать метаданные
+ * документа, список статусов пуст — и без объяснения это выглядит как «статус
+ * нельзя поменять». Вызывающий код показывает причину.
+ */
 export async function getOrderStates(token: string): Promise<OrderState[]> {
   type S = { id: string; name: string; meta: Record<string, unknown>; color?: number }
   const data = await get<{ states?: S[] }>('/entity/customerorder/metadata', {}, token)
-    .catch(() => ({ states: [] as S[] }))
   return (data.states ?? []).map(s => ({ id: s.id, name: s.name, meta: s.meta, color: stateColor(s.color) }))
 }
 

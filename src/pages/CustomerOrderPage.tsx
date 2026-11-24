@@ -88,6 +88,8 @@ export default function CustomerOrderPage() {
   const [stateId, setStateId] = useState('')
   // Статус новой заявки — к нему форма возвращается после создания заказа.
   const [defaultStateId, setDefaultStateId] = useState('')
+  // Почему список статусов пуст — обычно у роли нет прав на метаданные заказа.
+  const [statesError, setStatesError] = useState<string | null>(null)
 
   // Доп. поле «Вид товара» — берём его из метаданных заказа, чтобы виджет
   // подхватил поле сам, без зашитого id. Справочник → выпадающий список,
@@ -136,7 +138,10 @@ export default function CustomerOrderPage() {
         setDefaultStateId(start?.id ?? '')
         if (start) setStateId(prev => prev || start.id)
       })
-      .catch(() => setStates([]))
+      .catch(e => {
+        setStates([])
+        setStatesError(e instanceof Error ? e.message : String(e))
+      })
     getUoms(token)
       .then(us => setUomName(Object.fromEntries(us.map(u => [u.id, u.name]))))
       .catch(() => setUomName({}))
@@ -539,6 +544,11 @@ export default function CustomerOrderPage() {
               ))}
             </select>
           </span>
+          {states.length === 0 && (
+            <span className="shrink-0 text-[11px] text-amber-600" title={statesError ?? undefined}>
+              {statesError ? 'статусы не загрузились' : 'статусы не настроены'}
+            </span>
+          )}
         </label>
         <div className="hidden lg:block flex-1" />
         {/* Кнопка неактивна — сразу говорим, чего не хватает, иначе нажатие
