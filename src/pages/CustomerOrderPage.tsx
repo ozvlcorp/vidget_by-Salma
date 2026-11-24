@@ -26,17 +26,10 @@ interface Pos {
   pricePerLiter: number // «Цена за литр (доллар)» — из доп. поля товара, редактируемая
 }
 
-// Статусы новой заявки: только эти два, «Новый заказ» — по умолчанию.
-// Порядок в списке — как здесь.
-// `\w` в JS — только латиница, поэтому по кириллице сопоставляем через `.`
-const NEW_ORDER_STATES = [/нов.*заказ/i, /черновик/i]
-
-/** Отбирает разрешённые статусы в заданном порядке. Пусто → в аккаунте их нет. */
-function pickOrderStates(all: OrderState[]): OrderState[] {
-  return NEW_ORDER_STATES
-    .map(re => all.find(s => re.test(s.name)))
-    .filter((s): s is OrderState => !!s)
-}
+// Статус новой заявки по умолчанию. Остальные статусы берутся из аккаунта как
+// есть: какие шаги есть в бизнес-процессе, решает настройка МойСклад, а не
+// виджет. (`\w` в JS — только латиница, поэтому по кириллице сопоставляем `.`)
+const DEFAULT_ORDER_STATE = /нов.*заказ/i
 
 // Ширины столбцов (тянутся мышкой за границу в шапке):
 // товар · количество · остаток · ед.изм · объём · цена за литр · сумма
@@ -136,12 +129,12 @@ export default function CustomerOrderPage() {
       .catch(() => setAllCurrencies([]))
     getOrderStates(token)
       .then(all => {
-        // Обычно оставляем «Новый заказ» и «Черновик», первый — по умолчанию.
-        // Если их в аккаунте нет (переименовали), показываем все и не выбираем.
-        const allowed = pickOrderStates(all)
-        setStates(allowed.length ? allowed : all)
-        setDefaultStateId(allowed[0]?.id ?? '')
-        if (allowed.length) setStateId(prev => prev || allowed[0].id)
+        // Показываем все статусы аккаунта — сотрудник ведёт заявку по своему
+        // бизнес-процессу. Новая заявка по-прежнему начинается с «Нового заказа».
+        setStates(all)
+        const start = all.find(s => DEFAULT_ORDER_STATE.test(s.name))
+        setDefaultStateId(start?.id ?? '')
+        if (start) setStateId(prev => prev || start.id)
       })
       .catch(() => setStates([]))
     getUoms(token)
